@@ -297,6 +297,35 @@ class PDFReportGenerator:
         """Add ultra minimal spacing between sections"""
         story.append(Spacer(1, height*inch))
 
+    def _wrap_text_for_table(self, text: str, max_length: int = 30) -> str:
+        """Wrap long text with line breaks for better table display"""
+        if not text or len(str(text)) <= max_length:
+            return str(text)
+        
+        text = str(text)
+        words = text.split('_')  # Split on underscores for SQL names
+        if len(words) == 1:
+            words = text.split(' ')  # Fall back to spaces
+        
+        lines = []
+        current_line = []
+        current_length = 0
+        
+        for word in words:
+            if current_length + len(word) + len(current_line) <= max_length:
+                current_line.append(word)
+                current_length += len(word)
+            else:
+                if current_line:
+                    lines.append('_'.join(current_line) if '_' in text else ' '.join(current_line))
+                current_line = [word]
+                current_length = len(word)
+        
+        if current_line:
+            lines.append('_'.join(current_line) if '_' in text else ' '.join(current_line))
+        
+        return '\n'.join(lines)
+
     def _get_modern_table_style(self, header_color=None, data_color=None, grid_color=None):
         """Get compact Schultz-styled table formatting with enhanced text wrapping"""
         if header_color is None:
@@ -663,7 +692,7 @@ class PDFReportGenerator:
                 avg_wait = (wait_time / wait_count) if wait_count > 0 else 0
                 
                 table_data.append([
-                    wait_type,
+                    self._wrap_text_for_table(wait_type, 25),
                     f"{wait_time:,.0f}",
                     f"{wait_count:,}",
                     f"{avg_wait:.1f}"
@@ -707,8 +736,8 @@ class PDFReportGenerator:
             
             for stat in io_stats[:10]:  # Top 10
                 table_data.append([
-                    stat.get('database_name', 'Unknown')[:15],
-                    stat.get('file_type', 'Unknown')[:8],
+                    self._wrap_text_for_table(stat.get('database_name', 'Unknown'), 15),
+                    self._wrap_text_for_table(stat.get('file_type', 'Unknown'), 8),
                     f"{stat.get('num_of_reads', 0):,.0f}",
                     f"{stat.get('num_of_writes', 0):,.0f}",
                     f"{stat.get('avg_read_latency_ms', 0):.1f}ms",
@@ -776,8 +805,8 @@ class PDFReportGenerator:
                 
                 for idx in rebuild_indexes[:8]:  # Top 8
                     table_data.append([
-                        f"{idx.get('schema_name', '')}.{idx.get('table_name', '')}",
-                        idx.get('index_name', 'Unknown')[:25],
+                        self._wrap_text_for_table(f"{idx.get('schema_name', '')}.{idx.get('table_name', '')}", 25),
+                        self._wrap_text_for_table(idx.get('index_name', 'Unknown'), 25),
                         f"{idx.get('fragmentation_percent', 0):.1f}%",
                         str(idx.get('page_count', 0)),
                         'REBUILD'
@@ -822,8 +851,8 @@ class PDFReportGenerator:
                     action_emoji = '🔴' if action_color == 'red' else ('🟠' if action_color == 'orange' else ('🟡' if action_color == 'yellow' else '🔵'))
                     
                     table_data.append([
-                        self._create_table_paragraph(full_name[:30] + '...' if len(full_name) > 30 else full_name),
-                        self._create_table_paragraph(index_name[:20] + '...' if len(index_name) > 20 else index_name),
+                        self._create_table_paragraph(self._wrap_text_for_table(full_name, 30)),
+                        self._create_table_paragraph(self._wrap_text_for_table(index_name, 20)),
                         self._create_table_paragraph(f"{fragmentation:.1f}%"),
                         self._create_table_paragraph(f"{size_mb:.1f}"),
                         self._create_table_paragraph(f'{usage_emoji} {usage_category.replace("_", " ")}'),
@@ -877,14 +906,14 @@ class PDFReportGenerator:
             for idx in missing_indexes[:8]:  # Top 8
                 if isinstance(idx, dict):
                     db_table = f"{idx.get('database_name', '')}.{idx.get('table_name', '')}"
-                    equality_cols = idx.get('equality_columns', 'N/A')[:25]
+                    equality_cols = idx.get('equality_columns', 'N/A')
                     impact = idx.get('improvement_measure', idx.get('avg_user_impact', 0))
                     seeks = idx.get('user_seeks', 0)
                     priority = idx.get('priority', 'UNKNOWN')
                     
                     table_data.append([
-                        db_table,
-                        equality_cols,
+                        self._wrap_text_for_table(db_table, 25),
+                        self._wrap_text_for_table(equality_cols, 30),
                         f"{impact:.1f}" if isinstance(impact, (int, float)) else str(impact),
                         str(seeks),
                         priority
@@ -932,8 +961,8 @@ class PDFReportGenerator:
                         status_color = 'gray'
                     
                     table_data.append([
-                        self._create_table_paragraph(name[:30]),  # Truncate long names
-                        self._create_table_paragraph(current_val),
+                        self._create_table_paragraph(self._wrap_text_for_table(name, 30)),
+                        self._create_table_paragraph(self._wrap_text_for_table(current_val, 20)),
                         self._create_table_paragraph(f'{"🔴" if status_color == "red" else ("🟠" if status_color == "orange" else ("🟡" if status_color == "yellow" else "🟢"))} {status}')
                     ])
                 
@@ -1603,7 +1632,7 @@ class PDFReportGenerator:
                     date_str = error.get('log_date', '').strftime('%m/%d %H:%M') if error.get('log_date') else 'Unknown'
                     severity = error.get('severity', 0)
                     error_num = error.get('error_number', 0)
-                    description = error.get('text', '')[:80] + '...' if len(error.get('text', '')) > 80 else error.get('text', '')
+                    description = self._wrap_text_for_table(error.get('text', ''), 80)
                     
                     critical_data.append([
                         self._create_table_paragraph(date_str),
