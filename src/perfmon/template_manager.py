@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta
 
 class PerfMonTemplateManager:
-    """Manages PerfMon templates and data collection"""
+    """Manages PerfMon templates and data collection with smart collection management"""
     
     def __init__(self, config):
         """Initialize PerfMon template manager
@@ -25,6 +25,10 @@ class PerfMonTemplateManager:
         self.perfmon_dir = Path(__file__).parent.parent / 'perfmon'
         self.templates_dir = self.perfmon_dir / 'templates'
         self.data_dir = self.perfmon_dir / 'data'
+        
+        # Collection management
+        self.sqlspeedinator_prefix = "SQLSpeedinator"
+        self.managed_collections = set()  # Track collections we created
         
         # Ensure directories exist
         self.templates_dir.mkdir(parents=True, exist_ok=True)
@@ -44,9 +48,12 @@ class PerfMonTemplateManager:
             root = tree.getroot()
             
             # Extract basic information
+            display_name_elem = root.find('DisplayName')
+            description_elem = root.find('Description')
+            
             template_info = {
-                'name': root.find('DisplayName').text if root.find('DisplayName') is not None else 'Unknown',
-                'description': root.find('Description').text if root.find('Description') is not None else '',
+                'name': display_name_elem.text if display_name_elem is not None and display_name_elem.text else 'Unknown',
+                'description': description_elem.text if description_elem is not None and description_elem.text else '',
                 'sample_interval': 15,  # Default
                 'counters': [],
                 'output_location': str(self.data_dir),
@@ -59,7 +66,7 @@ class PerfMonTemplateManager:
             if perf_collector is not None:
                 # Sample interval
                 sample_interval = perf_collector.find('SampleInterval')
-                if sample_interval is not None:
+                if sample_interval is not None and sample_interval.text:
                     template_info['sample_interval'] = int(sample_interval.text)
                 
                 # Extract all counters
@@ -279,3 +286,179 @@ class PerfMonTemplateManager:
     def get_default_template_path(self) -> Path:
         """Get path to default SQL performance template"""
         return self.templates_dir / 'sql_performance_template.xml'
+    
+    def list_existing_collections(self) -> List[Dict[str, str]]:
+        """List all existing Performance Monitor Data Collector Sets"""
+        try:
+            cmd = 'logman query -n'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            collections = []
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                for line in lines[2:]:  # Skip header lines
+                    if line.strip():
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            name = parts[0].strip()
+                            status = parts[1].strip() if len(parts) > 1 else 'Unknown'
+                            collections.append({
+                                'name': name,
+                                'status': status
+                            })
+            
+            return collections
+            
+        except Exception as e:
+            self.logger.error(f"Error listing existing collections: {e}")
+            return []
+    
+    def find_matching_collection(self, template_counters: List[str]) -> Optional[str]:
+        """Find existing collection that matches our template counters
+        
+        Args:
+            template_counters: List of counter paths from template
+            
+        Returns:
+            Name of matching collection or None
+        """
+        try:
+            existing_collections = self.list_existing_collections()
+            
+            for collection in existing_collections:
+                collection_name = collection['name']
+                
+                # Skip if not our managed collection
+                if not collection_name.startswith(self.sqlspeedinator_prefix):
+                    continue
+                
+                # Get collection details
+                try:
+                    cmd = f'logman query "{collection_name}" -v'
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        # Parse counters from output
+                        collection_counters = self._extract_counters_from_logman_output(result.stdout)
+                        
+                        # Check if counters match (allow for subset match)
+                        matching_counters = set(template_counters) & set(collection_counters)
+                        match_percentage = len(matching_counters) / len(template_counters) if template_counters else 0
+                        
+                        # If 80%+ match, consider it a match
+                        if match_percentage >= 0.8:
+                            self.logger.info(f"Found matching collection '{collection_name}' with {match_percentage:.1%} counter match")
+                            return collection_name
+                            
+                except Exception as e:
+                    self.logger.debug(f"Error checking collection {collection_name}: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error finding matching collection: {e}")
+            return None
+    
+    def _extract_counters_from_logman_output(self, logman_output: str) -> List[str]:
+        """Extract counter paths from logman query output"""
+        counters = []
+        
+        try:
+            lines = logman_output.split('\n')
+            in_counters_section = False
+            
+            for line in lines:
+                line = line.strip()
+                
+                if 'Counter:' in line or 'Counters:' in line:
+                    in_counters_section = True
+                    continue
+                elif in_counters_section and line.startswith('\\'):
+                    counters.append(line)
+                elif in_counters_section and not line:
+                    break
+                    
+        except Exception as e:
+            self.logger.debug(f"Error extracting counters from logman output: {e}")
+        
+        return counters
+    
+    def create_or_reuse_collection(self, template_info: Dict[str, Any], collection_name: Optional[str] = None) -> Optional[str]:
+        """Create new collection or reuse existing matching collection
+        
+        Args:
+            template_info: Parsed template information
+            collection_name: Preferred collection name (auto-generated if None)
+            
+        Returns:
+            Collection name that was created or reused, or None if failed
+        """
+        try:
+            template_counters = [counter['path'] for counter in template_info.get('counters', [])]
+            
+            # Try to find existing matching collection
+            existing_collection = self.find_matching_collection(template_counters)
+            
+            if existing_collection:
+                self.logger.info(f"♻️  Reusing existing collection: {existing_collection}")
+                return existing_collection
+            
+            # Create new collection
+            if not collection_name:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                collection_name = f"{self.sqlspeedinator_prefix}_{timestamp}"
+            
+            self.logger.info(f"📊 Creating new collection: {collection_name}")
+            
+            # Use existing create_data_collector_set method
+            dcs_file = self.create_data_collector_set(template_info, collection_name)
+            
+            if dcs_file:
+                # Track that we created this collection
+                self.managed_collections.add(collection_name)
+                self.logger.info(f"✅ Successfully created collection: {collection_name}")
+                return collection_name
+            else:
+                self.logger.error(f"❌ Failed to create collection: {collection_name}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error creating or reusing collection: {e}")
+            return None
+    
+    def cleanup_managed_collections(self):
+        """Clean up all collections that were created by this instance"""
+        if not self.managed_collections:
+            return
+        
+        self.logger.info(f"🧹 Cleaning up {len(self.managed_collections)} managed collections...")
+        
+        for collection_name in list(self.managed_collections):
+            try:
+                # Stop collection if running
+                stop_cmd = f'logman stop "{collection_name}"'
+                subprocess.run(stop_cmd, shell=True, capture_output=True)
+                
+                # Delete collection
+                delete_cmd = f'logman delete "{collection_name}"'
+                result = subprocess.run(delete_cmd, shell=True, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    self.logger.info(f"🗑️  Cleaned up collection: {collection_name}")
+                    self.managed_collections.remove(collection_name)
+                else:
+                    self.logger.warning(f"Failed to delete collection {collection_name}: {result.stderr}")
+                    
+            except Exception as e:
+                self.logger.error(f"Error cleaning up collection {collection_name}: {e}")
+        
+        if not self.managed_collections:
+            self.logger.info("✅ All managed collections cleaned up successfully")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        try:
+            self.cleanup_managed_collections()
+        except:
+            pass  # Ignore errors in destructor
