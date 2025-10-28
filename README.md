@@ -115,18 +115,38 @@ python main.py -s your-server-name
 # Complete enterprise analysis with AI dialog and performance protection
 python main.py -s your-server-name --ai-analysis
 
-# Production-safe analysis with smart collection reuse
+# Production-safe analysis with PerfMon data collection (duration in MINUTES)
 python main.py -s your-server-name --perfmon-duration 240
+
+# Short performance monitoring (30 minutes) with AI analysis
+python main.py -s your-server-name --perfmon-duration 30 --ai-analysis
+
+# Quick analysis with 5 minutes of performance data collection
+python main.py -s your-server-name --perfmon-duration 5
 
 # Analyze existing Performance Monitor data with enterprise features
 python main.py -s your-server-name --perfmon-file "C:\PerfLogs\sql_perf.blg"
 
-# Full enterprise suite: AI + PerfMon + Protection + Status tracking
+# Full enterprise suite: AI + 2-hour PerfMon + Protection + Status tracking
 python main.py -s your-server-name --perfmon-duration 120 --ai-analysis
 
 # Night mode with enterprise protection
 python main.py -s your-server-name --night-mode
 ```
+
+### ⏱️ Performance Monitor Duration
+
+**Important**: The `--perfmon-duration` parameter is specified in **MINUTES**:
+- `--perfmon-duration 5` = 5 minutes of data collection
+- `--perfmon-duration 30` = 30 minutes of data collection  
+- `--perfmon-duration 120` = 2 hours of data collection
+- `--perfmon-duration 240` = 4 hours of data collection
+
+Recommended durations:
+- **Quick Test**: 5-10 minutes
+- **Standard Analysis**: 30-60 minutes
+- **Comprehensive Analysis**: 120-240 minutes
+- **Production Monitoring**: 240+ minutes
 
 ## 📊 Enterprise Performance Monitor Integration
 

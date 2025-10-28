@@ -227,21 +227,8 @@ class PDFReportGenerator:
         text_str = re.sub(r'\s+', ' ', text_str)  # Replace multiple spaces with single space
         text_str = text_str.strip()
         
-        # Smart text wrapping based on content length
-        if len(text_str) > max_width:
-            # For very long text, truncate intelligently at sentence boundaries
-            sentences = text_str.split('. ')
-            truncated = ""
-            for sentence in sentences:
-                if len(truncated + sentence + '. ') <= max_width - 3:
-                    truncated += sentence + '. '
-                else:
-                    break
-            
-            if len(truncated) < 10:  # If we couldn't fit even one sentence
-                text_str = text_str[:max_width-3] + "..."
-            else:
-                text_str = truncated.rstrip('. ') + "..."
+        # No text truncation - allow full text to wrap across multiple lines
+        # The table will automatically adjust height to accommodate the content
         
         # Final cleanup - ensure no problematic characters remain
         text_str = text_str.replace('<', '').replace('>', '').replace('&', 'and')
@@ -369,8 +356,8 @@ class PDFReportGenerator:
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, 0), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
             
@@ -379,13 +366,13 @@ class PDFReportGenerator:
             ('TEXTCOLOR', (0, 1), (-1, -1), self.schultz_colors['dark_gray']),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 16), # Extra space for AI content
-            ('TOPPADDING', (0, 1), (-1, -1), 12),    # Extra space for AI content
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 20), # Much more space for AI content
+            ('TOPPADDING', (0, 1), (-1, -1), 15),    # Much more space for AI content
             ('LEFTPADDING', (0, 1), (-1, -1), 8),    
             ('RIGHTPADDING', (0, 1), (-1, -1), 8),   
             
             # Optimized for multi-line AI text
-            ('LEADING', (0, 1), (-1, -1), 14),       # Better line spacing for AI content
+            ('LEADING', (0, 1), (-1, -1), 16),       # Better line spacing for AI content
             ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),   # Enable word wrapping
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),     # Align content to top
             
@@ -393,8 +380,8 @@ class PDFReportGenerator:
             ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e8e8e8')),
             ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#f0f0f0')),
             
-            # Dynamic row height for AI content
-            ('MINHEIGHT', (0, 0), (-1, -1), 32),     # Larger minimum for AI tables
+            # Dynamic row height for AI content - much larger minimum
+            ('MINHEIGHT', (0, 0), (-1, -1), 48),     # Much larger minimum for AI tables
             
             # Alternating background for readability
             ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
@@ -979,12 +966,12 @@ class PDFReportGenerator:
                 else:
                     priority_text = f"#{i} (LOW)"
                 
-                # Use Paragraph objects with appropriate max widths for AI table columns
+                # Use Paragraph objects with full text (no max_width limits for full content)
                 table_data.append([
-                    self._create_table_paragraph(priority_text, max_width=15),
-                    self._create_table_paragraph(str(issue), max_width=80),      # Larger for issue description
-                    self._create_table_paragraph(impact, max_width=10),
-                    self._create_table_paragraph(str(recommendation), max_width=120)  # Larger for recommendations
+                    self._create_table_paragraph(priority_text, font_size=8),
+                    self._create_table_paragraph(str(issue), font_size=8),      
+                    self._create_table_paragraph(impact, font_size=8),
+                    self._create_table_paragraph(str(recommendation), font_size=8)  
                 ])
             
             # Table with optimized column widths for AI content
@@ -1497,20 +1484,20 @@ class PDFReportGenerator:
                     root_cause = bottleneck.get('root_cause', 'Not specified')
                     recommendation = bottleneck.get('recommendation', 'No recommendation')
                     
-                    # Color code severity
+                    # Color code severity with plain text (no HTML tags)
                     if severity == 'CRITICAL':
-                        severity_text = '<font color="red">🔴 CRITICAL</font>'
+                        severity_text = '🔴 CRITICAL'
                     elif severity == 'WARNING':
-                        severity_text = '<font color="orange">🟠 WARNING</font>'
+                        severity_text = '🟠 WARNING'
                     else:
-                        severity_text = f'<font color="green">🟢 {severity}</font>'
+                        severity_text = f'🟢 {severity}'
                     
-                    # Use enhanced table paragraphs for better text wrapping
+                    # Use enhanced table paragraphs with full text (no truncation)
                     ai_bottleneck_data.append([
-                        self._create_table_paragraph(component, max_width=20),
-                        self._create_table_paragraph(severity_text, max_width=15),
-                        self._create_table_paragraph(root_cause, max_width=80),
-                        self._create_table_paragraph(recommendation, max_width=100)
+                        self._create_table_paragraph(component, font_size=8),
+                        self._create_table_paragraph(severity_text, font_size=8),
+                        self._create_table_paragraph(root_cause, font_size=8),
+                        self._create_table_paragraph(recommendation, font_size=8)
                     ])
                 
                 # Use optimized column widths for PerfMon AI table
