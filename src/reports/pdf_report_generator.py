@@ -692,24 +692,26 @@ class PDFReportGenerator:
         if current_waits:
             story.append(Paragraph("📊 Top Wait Types", self.styles['KeepTogetherSub']))
             
-            # Create compact table for wait types
-            table_data = [['Wait Type', 'Wait Time (ms)', 'Wait Count', 'Avg Wait (ms)']]
+            # Create compact table for wait types with percentage
+            table_data = [['Wait Type', 'Wait Time (ms)', '%', 'Wait Count', 'Avg Wait (ms)']]
             
             for wait in current_waits[:10]:  # Top 10
                 wait_type = wait.get('wait_type', 'Unknown')
                 wait_time = wait.get('wait_time_ms', 0)
                 wait_count = wait.get('waiting_tasks_count', 0)
+                wait_percentage = wait.get('wait_percentage', 0)
                 avg_wait = (wait_time / wait_count) if wait_count > 0 else 0
                 
                 table_data.append([
-                    self._wrap_text_for_table(wait_type, 25),
-                    f"{wait_time:,.0f}",
-                    f"{wait_count:,}",
-                    f"{avg_wait:.1f}"
+                    self._create_table_paragraph(self._wrap_text_for_table(wait_type, 16)),  # Use proper paragraph wrapping
+                    self._create_table_paragraph(f"{wait_time:,.0f}"),
+                    self._create_table_paragraph(f"{wait_percentage:.1f}%"),
+                    self._create_table_paragraph(f"{wait_count:,}"),
+                    self._create_table_paragraph(f"{avg_wait:.1f}")
                 ])
             
             # Use responsive column widths for better fit
-            wait_table = Table(table_data, colWidths=self._get_responsive_column_widths(4))
+            wait_table = Table(table_data, colWidths=self._get_responsive_column_widths(5))
             wait_table.setStyle(self._get_modern_table_style())
             story.append(wait_table)
             story.append(Spacer(1, 0.02*inch))
@@ -772,10 +774,11 @@ class PDFReportGenerator:
         rebuild_indexes = index_analysis.get('rebuild_recommendations', [])
         reorg_indexes = index_analysis.get('reorganize_recommendations', [])
         unused_indexes = index_analysis.get('unused_indexes', [])
+        duplicate_indexes = index_analysis.get('duplicate_indexes', [])
         fragmentation_usage = index_analysis.get('fragmentation_usage_analysis', [])
         
         # Only show summary if there are issues
-        if rebuild_indexes or reorg_indexes or unused_indexes or fragmentation_usage:
+        if rebuild_indexes or reorg_indexes or unused_indexes or duplicate_indexes or fragmentation_usage:
             story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
             
             # Enhanced summary with fragmentation usage analysis
@@ -787,13 +790,14 @@ class PDFReportGenerator:
                 
                 frag_summary = f"""
                 Smart fragmentation analysis found {rebuild_count} high-priority indexes needing rebuild, 
-                {reorg_count} requiring reorganization, and {high_usage_issues} heavily-used indexes with performance issues. 
+                {reorg_count} requiring reorganization, {high_usage_issues} heavily-used indexes with performance issues,
+                and {len(duplicate_indexes)} overlapping/duplicate indexes that should be reviewed.
                 """
             else:
                 frag_summary = f"""
                 Index maintenance analysis found {len(rebuild_indexes)} indexes requiring rebuild, 
-                {len(reorg_indexes)} needing reorganization, and {len(unused_indexes)} unused indexes 
-                that could be considered for removal.
+                {len(reorg_indexes)} needing reorganization, {len(unused_indexes)} unused indexes,
+                and {len(duplicate_indexes)} overlapping/duplicate indexes that could be optimized.
                 """
             
             story.append(Paragraph(frag_summary, self.styles['ExecutiveSummary']))
@@ -876,6 +880,37 @@ class PDFReportGenerator:
                 ))
                 story.append(frag_usage_table)
                 story.append(Spacer(1, 0.02*inch))
+        
+        # Add Overlapping/Duplicate Indexes section
+        if duplicate_indexes:
+            story.append(Paragraph("🔍 Overlapping & Duplicate Indexes", self.styles['KeepTogetherSub']))
+            
+            # Create table data for duplicate indexes
+            table_data = [['Schema.Table', 'Index 1', 'Index 2', 'Type', 'Key Columns']]
+            
+            for idx in duplicate_indexes[:10]:  # Top 10 to save space
+                schema_table = f"{idx.get('schema_name', '')}.{idx.get('table_name', '')}"
+                index1_name = idx.get('index1_name', 'Unknown')
+                index2_name = idx.get('index2_name', 'Unknown')
+                duplicate_type = idx.get('duplicate_type', 'Unknown')
+                key_columns = idx.get('index1_key_columns', 'Unknown')
+                
+                # Determine emoji based on type
+                type_emoji = "🔴" if duplicate_type == "EXACT_DUPLICATE" else "🟠"
+                type_text = f"{type_emoji} {duplicate_type.replace('_', ' ')}"
+                
+                table_data.append([
+                    self._create_table_paragraph(self._wrap_text_for_table(schema_table, 20)),
+                    self._create_table_paragraph(self._wrap_text_for_table(index1_name, 20)),
+                    self._create_table_paragraph(self._wrap_text_for_table(index2_name, 20)),
+                    self._create_table_paragraph(type_text),
+                    self._create_table_paragraph(self._wrap_text_for_table(key_columns, 30))
+                ])
+            
+            duplicate_table = Table(table_data, colWidths=self._get_responsive_column_widths(5))
+            duplicate_table.setStyle(self._get_modern_table_style())
+            story.append(duplicate_table)
+            story.append(Spacer(1, 0.02*inch))
         
         return story
 
