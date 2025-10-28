@@ -47,6 +47,7 @@ class IndexAnalyzer:
                 'unused_indexes': self._get_unused_indexes(),
                 'duplicate_indexes': self._find_duplicate_indexes(),
                 'index_usage_stats': self._get_index_usage_stats(),
+                'fragmentation_usage_analysis': self._get_fragmentation_usage_analysis(),
                 'maintenance_recommendations': self._get_index_maintenance_recommendations(),
                 'recommendations': self._generate_index_recommendations()
             }
@@ -289,6 +290,124 @@ class IndexAnalyzer:
         
         return self.connection.execute_query(query)
     
+    def _get_fragmentation_usage_analysis(self) -> Optional[List[Dict[str, Any]]]:
+        """Analyze index fragmentation combined with usage patterns for smart maintenance decisions
+        Based on Jacob Saugmann's fragmentation and usage analysis script"""
+        
+        fragmentation_results = []
+        user_databases = self._get_user_databases()
+        
+        if not user_databases:
+            self.logger.warning("No user databases found for fragmentation usage analysis")
+            return None
+        
+        # Save current database context
+        original_db_query = "SELECT DB_NAME() as current_db"
+        original_db_result = self.connection.execute_query(original_db_query)
+        original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
+        
+        try:
+            for db_name in user_databases:
+                self.logger.debug(f"Analyzing index fragmentation and usage in database: {db_name}")
+                
+                # Change to user database
+                if not self.connection.change_database(db_name):
+                    self.logger.warning(f"Could not access database {db_name}, skipping...")
+                    continue
+                
+                query = """
+                WITH IndexStats AS (
+                    SELECT
+                        s.name AS SchemaName,
+                        t.name AS TableName,
+                        i.name AS IndexName,
+                        ips.avg_fragmentation_in_percent,
+                        ips.page_count,
+                        ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0) AS TotalReads,
+                        ISNULL(us.user_updates, 0) AS TotalWrites,
+                        us.last_user_seek,
+                        us.last_user_scan,
+                        us.last_user_lookup,
+                        us.last_user_update,
+                        CAST(ips.page_count * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb
+                    FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED') AS ips
+                    INNER JOIN sys.indexes AS i ON ips.object_id = i.object_id AND ips.index_id = i.index_id
+                    INNER JOIN sys.tables AS t ON i.object_id = t.object_id
+                    INNER JOIN sys.schemas AS s ON t.schema_id = s.schema_id
+                    LEFT JOIN sys.dm_db_index_usage_stats AS us ON i.object_id = us.object_id 
+                        AND i.index_id = us.index_id AND us.database_id = DB_ID()
+                    WHERE ips.avg_fragmentation_in_percent > 30
+                      AND ips.page_count > 500  -- Only large indexes (>4MB)
+                      AND i.is_disabled = 0
+                      AND i.is_hypothetical = 0
+                )
+                SELECT
+                    DB_NAME() AS database_name,
+                    SchemaName,
+                    TableName,
+                    ISNULL(IndexName, '(ALL)') AS IndexName,
+                    avg_fragmentation_in_percent AS FragmentationPct,
+                    page_count AS PageCount,
+                    size_mb,
+                    TotalReads,
+                    TotalWrites,
+                    last_user_seek,
+                    last_user_scan,
+                    last_user_lookup,
+                    last_user_update,
+                    CASE
+                        WHEN avg_fragmentation_in_percent > 80 AND TotalReads > 1000 THEN 'REBUILD'
+                        WHEN avg_fragmentation_in_percent BETWEEN 30 AND 80 AND TotalReads > 100 THEN 'REORGANIZE'
+                        ELSE 'IGNORE'
+                    END AS ActionRecommendation,
+                    CASE
+                        WHEN avg_fragmentation_in_percent > 80 AND TotalReads > 1000 THEN
+                            CASE WHEN IndexName IS NULL OR IndexName = '(ALL)'
+                                THEN 'ALTER INDEX ALL ON [' + SchemaName + '].[' + TableName + '] REBUILD WITH (ONLINE = OFF);'
+                                ELSE 'ALTER INDEX [' + IndexName + '] ON [' + SchemaName + '].[' + TableName + '] REBUILD WITH (ONLINE = OFF);'
+                            END
+                        WHEN avg_fragmentation_in_percent BETWEEN 30 AND 80 AND TotalReads > 100 THEN
+                            CASE WHEN IndexName IS NULL OR IndexName = '(ALL)'
+                                THEN 'ALTER INDEX ALL ON [' + SchemaName + '].[' + TableName + '] REORGANIZE;'
+                                ELSE 'ALTER INDEX [' + IndexName + '] ON [' + SchemaName + '].[' + TableName + '] REORGANIZE;'
+                            END
+                        ELSE '-- IGNORE: Low usage or low fragmentation'
+                    END AS SQLCommand,
+                    CASE
+                        WHEN TotalReads = 0 THEN 'UNUSED'
+                        WHEN TotalReads > 10000 THEN 'VERY_HIGH_USAGE'
+                        WHEN TotalReads > 1000 THEN 'HIGH_USAGE'
+                        WHEN TotalReads > 100 THEN 'MODERATE_USAGE'
+                        ELSE 'LOW_USAGE'
+                    END AS UsageCategory,
+                    CASE
+                        WHEN TotalWrites > TotalReads * 2 THEN 'WRITE_HEAVY'
+                        WHEN TotalReads > TotalWrites * 2 THEN 'READ_HEAVY'
+                        ELSE 'BALANCED'
+                    END AS WorkloadPattern
+                FROM IndexStats
+                ORDER BY
+                    CASE
+                        WHEN avg_fragmentation_in_percent > 80 AND TotalReads > 1000 THEN 1
+                        WHEN avg_fragmentation_in_percent BETWEEN 30 AND 80 AND TotalReads > 100 THEN 2
+                        ELSE 3
+                    END,
+                    avg_fragmentation_in_percent DESC,
+                    TotalReads DESC
+                """
+                
+                db_result = self.connection.execute_query(query)
+                if db_result:
+                    fragmentation_results.extend(db_result)
+                    
+        except Exception as e:
+            self.logger.error(f"Error during fragmentation usage analysis: {str(e)}")
+        finally:
+            # Restore original database context
+            self.connection.change_database(original_db)
+        
+        return fragmentation_results if fragmentation_results else None
+    
     def _get_index_maintenance_recommendations(self) -> List[Dict[str, Any]]:
         """Get index maintenance recommendations with specific actions (REBUILD/REORGANIZE)"""
         query = """
@@ -453,6 +572,75 @@ class IndexAnalyzer:
                         'Consider if all columns are necessary',
                         'Evaluate impact on insert/update performance',
                         'Monitor for write-heavy workloads'
+                    ]
+                })
+        
+        # Fragmentation Usage Analysis - Smart Maintenance Recommendations
+        frag_usage_analysis = self._get_fragmentation_usage_analysis()
+        if frag_usage_analysis:
+            rebuild_candidates = [idx for idx in frag_usage_analysis if idx.get('ActionRecommendation') == 'REBUILD']
+            reorganize_candidates = [idx for idx in frag_usage_analysis if idx.get('ActionRecommendation') == 'REORGANIZE']
+            
+            # High priority rebuild recommendations
+            if rebuild_candidates:
+                high_usage_rebuilds = [idx for idx in rebuild_candidates if idx.get('UsageCategory') in ['VERY_HIGH_USAGE', 'HIGH_USAGE']]
+                if high_usage_rebuilds:
+                    total_size = sum(idx.get('size_mb', 0) for idx in high_usage_rebuilds)
+                    recommendations.append({
+                        'priority': 'CRITICAL',
+                        'category': 'Smart Index Maintenance',
+                        'issue': f'{len(high_usage_rebuilds)} heavily used indexes need REBUILD (>80% fragmentation, {total_size:.1f} MB)',
+                        'recommendations': [
+                            'Priority rebuild - these indexes impact performance significantly',
+                            'Schedule during maintenance window for best results',
+                            'Consider Enterprise Edition online rebuilds if available',
+                            'Monitor performance improvement after rebuild'
+                        ],
+                        'details': high_usage_rebuilds
+                    })
+                
+                # Low usage rebuild recommendations
+                low_usage_rebuilds = [idx for idx in rebuild_candidates if idx.get('UsageCategory') in ['LOW_USAGE', 'MODERATE_USAGE']]
+                if low_usage_rebuilds:
+                    recommendations.append({
+                        'priority': 'MEDIUM',
+                        'category': 'Smart Index Maintenance',
+                        'issue': f'{len(low_usage_rebuilds)} moderately used indexes need REBUILD',
+                        'recommendations': [
+                            'Lower priority rebuilds - evaluate if worth the maintenance time',
+                            'Consider if these indexes are actually needed',
+                            'May combine with other maintenance activities'
+                        ]
+                    })
+            
+            # Reorganize recommendations
+            if reorganize_candidates:
+                total_reorg_size = sum(idx.get('size_mb', 0) for idx in reorganize_candidates)
+                recommendations.append({
+                    'priority': 'LOW',
+                    'category': 'Smart Index Maintenance',
+                    'issue': f'{len(reorganize_candidates)} indexes need REORGANIZE (30-80% fragmentation, {total_reorg_size:.1f} MB)',
+                    'recommendations': [
+                        'REORGANIZE operations can run online',
+                        'Less disruptive than rebuilds',
+                        'Good for routine maintenance',
+                        'Consider automated maintenance plans'
+                    ],
+                    'details': reorganize_candidates
+                })
+            
+            # Workload pattern insights
+            write_heavy_indexes = [idx for idx in frag_usage_analysis if idx.get('WorkloadPattern') == 'WRITE_HEAVY']
+            if write_heavy_indexes:
+                recommendations.append({
+                    'priority': 'INFO',
+                    'category': 'Index Workload Analysis',
+                    'issue': f'{len(write_heavy_indexes)} indexes show write-heavy patterns',
+                    'recommendations': [
+                        'Write-heavy indexes fragment faster',
+                        'Consider more frequent maintenance cycles',
+                        'Evaluate if all columns in index are necessary',
+                        'Monitor fill factor settings'
                     ]
                 })
         

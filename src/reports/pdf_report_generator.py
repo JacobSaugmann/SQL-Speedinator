@@ -650,16 +650,31 @@ class PDFReportGenerator:
         rebuild_indexes = index_analysis.get('rebuild_recommendations', [])
         reorg_indexes = index_analysis.get('reorganize_recommendations', [])
         unused_indexes = index_analysis.get('unused_indexes', [])
+        fragmentation_usage = index_analysis.get('fragmentation_usage_analysis', [])
         
         # Only show summary if there are issues
-        if rebuild_indexes or reorg_indexes or unused_indexes:
+        if rebuild_indexes or reorg_indexes or unused_indexes or fragmentation_usage:
             story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
-            summary_text = f"""
-            Index maintenance analysis found {len(rebuild_indexes)} indexes requiring rebuild, 
-            {len(reorg_indexes)} needing reorganization, and {len(unused_indexes)} unused indexes 
-            that could be considered for removal.
-            """
-            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+            
+            # Enhanced summary with fragmentation usage analysis
+            frag_summary = ""
+            if fragmentation_usage:
+                rebuild_count = len([idx for idx in fragmentation_usage if idx.get('ActionRecommendation') == 'REBUILD'])
+                reorg_count = len([idx for idx in fragmentation_usage if idx.get('ActionRecommendation') == 'REORGANIZE'])
+                high_usage_issues = len([idx for idx in fragmentation_usage if idx.get('UsageCategory') in ['VERY_HIGH_USAGE', 'HIGH_USAGE'] and idx.get('ActionRecommendation') != 'IGNORE'])
+                
+                frag_summary = f"""
+                Smart fragmentation analysis found {rebuild_count} high-priority indexes needing rebuild, 
+                {reorg_count} requiring reorganization, and {high_usage_issues} heavily-used indexes with performance issues. 
+                """
+            else:
+                frag_summary = f"""
+                Index maintenance analysis found {len(rebuild_indexes)} indexes requiring rebuild, 
+                {len(reorg_indexes)} needing reorganization, and {len(unused_indexes)} unused indexes 
+                that could be considered for removal.
+                """
+            
+            story.append(Paragraph(frag_summary, self.styles['ExecutiveSummary']))
         
         story.append(Spacer(1, 0.02*inch))
         
@@ -684,6 +699,49 @@ class PDFReportGenerator:
                     header_color=self.schultz_colors['red']
                 ))
                 story.append(rebuild_table)
+                story.append(Spacer(1, 0.02*inch))
+        
+        # Smart Fragmentation & Usage Analysis
+        if fragmentation_usage:
+            story.append(Paragraph("🧠 Smart Fragmentation & Usage Analysis", self.styles['KeepTogetherSub']))
+            
+            # Filter for high-priority items (not IGNORE)
+            priority_items = [idx for idx in fragmentation_usage if idx.get('ActionRecommendation') != 'IGNORE']
+            
+            if priority_items:
+                table_data = [self._create_table_header(['Database.Schema.Table', 'Index', 'Frag %', 'Size MB', 'Usage', 'Action'])]
+                
+                for idx in priority_items[:10]:  # Top 10 priority items
+                    db_name = idx.get('database_name', '')
+                    schema_name = idx.get('SchemaName', '')
+                    table_name = idx.get('TableName', '')
+                    index_name = idx.get('IndexName', 'Unknown')
+                    fragmentation = idx.get('FragmentationPct', 0)
+                    size_mb = idx.get('size_mb', 0)
+                    usage_category = idx.get('UsageCategory', 'UNKNOWN')
+                    action = idx.get('ActionRecommendation', 'IGNORE')
+                    
+                    # Create readable identifiers
+                    full_name = f"{db_name}.{schema_name}.{table_name}" if db_name else f"{schema_name}.{table_name}"
+                    
+                    # Color code usage categories
+                    usage_color = 'red' if usage_category in ['VERY_HIGH_USAGE', 'HIGH_USAGE'] else 'orange' if usage_category == 'MODERATE_USAGE' else 'gray'
+                    action_color = 'red' if action == 'REBUILD' else 'orange' if action == 'REORGANIZE' else 'green'
+                    
+                    table_data.append([
+                        self._create_table_paragraph(full_name[:30] + '...' if len(full_name) > 30 else full_name),
+                        self._create_table_paragraph(index_name[:20] + '...' if len(index_name) > 20 else index_name),
+                        self._create_table_paragraph(f"{fragmentation:.1f}%"),
+                        self._create_table_paragraph(f"{size_mb:.1f}"),
+                        self._create_table_paragraph(f'<font color="{usage_color}">{usage_category.replace("_", " ")}</font>'),
+                        self._create_table_paragraph(f'<font color="{action_color}">{action}</font>')
+                    ])
+                
+                frag_usage_table = Table(table_data, colWidths=self._get_responsive_column_widths(6))
+                frag_usage_table.setStyle(self._get_modern_table_style(
+                    header_color=self.schultz_colors['purple']
+                ))
+                story.append(frag_usage_table)
                 story.append(Spacer(1, 0.02*inch))
         
         return story
