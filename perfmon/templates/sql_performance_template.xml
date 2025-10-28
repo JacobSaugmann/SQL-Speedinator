@@ -1,0 +1,28 @@
+<DataCollectorSet>
+    <Status>1</Status>
+    <Duration>0</Duration>
+    <Description>SQL Server Performance Monitoring</Description>
+    <DisplayName>SQL Server Performance Counters</DisplayName>
+    <SchedulesEnabled>0</SchedulesEnabled>
+    <PerformanceCounterDataCollector>
+        <DataCollectorType>0</DataCollectorType>
+        <Name>SQL Server Performance Counters</Name>
+        <FileName>sql_performance</FileName>
+        <FileNameFormat>3</FileNameFormat>
+        <LogAppend>0</LogAppend>
+        <LogCircular>0</LogCircular>
+        <LogOverwrite>0</LogOverwrite>
+        <SampleInterval>1</SampleInterval>
+        <LogFileFormat>3</LogFileFormat>
+        <Counter>\Processor(_Total)\% Processor Time</Counter>
+        <Counter>\Memory\Available MBytes</Counter>
+        <Counter>\Memory\Pages/sec</Counter>
+        <Counter>\PhysicalDisk(_Total)\% Disk Time</Counter>
+        <Counter>\PhysicalDisk(_Total)\Disk Reads/sec</Counter>
+        <Counter>\PhysicalDisk(_Total)\Disk Writes/sec</Counter>
+        <Counter>\SQLServer:General Statistics\User Connections</Counter>
+        <Counter>\SQLServer:SQL Statistics\Batch Requests/sec</Counter>
+        <Counter>\SQLServer:Buffer Manager\Buffer cache hit ratio</Counter>
+        <Counter>\SQLServer:Buffer Manager\Page life expectancy</Counter>
+    </PerformanceCounterDataCollector>
+</DataCollectorSet>

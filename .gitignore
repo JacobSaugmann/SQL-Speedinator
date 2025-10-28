@@ -58,11 +58,16 @@ test_reports/
 
 # Performance Monitor Data
 src/perfmon/data/
-src/perfmon/templates/*.xml
+src/perfmon/templates/*_20*.xml
 src/perfmon/templates/*.json
 
-# Old perfmon folder (if exists)
-perfmon/
+# Template files should be included - only exclude generated ones
+!src/perfmon/templates/sql_performance_template.xml
+
+# Old perfmon folder (if exists) 
+perfmon/data/
+perfmon/templates/*_20*.xml
+!perfmon/templates/sql_performance_template.xml
 
 # OS
 .DS_Store
