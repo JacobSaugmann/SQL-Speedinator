@@ -38,24 +38,30 @@ class LogAnalyzer:
         self.performance_keywords = {
             'io_errors': [
                 'I/O request', 'disk', 'read error', 'write error', 'timeout',
-                'The operating system returned error', 'device error'
+                'The operating system returned error', 'device error', 'I/O timeout'
             ],
             'deadlocks': [
-                'deadlock', 'victim', 'lock timeout', 'blocking'
+                'deadlock', 'victim', 'lock timeout', 'blocking', 'DEADLOCK_GRAPH'
             ],
             'autogrow': [
                 'autogrow', 'growing', 'file growth', 'database growth',
-                'log file auto', 'data file auto'
+                'log file auto', 'data file auto', 'expanded by'
             ],
             'memory': [
-                'memory', 'out of memory', 'insufficient memory', 'page fault'
+                'memory', 'out of memory', 'insufficient memory', 'page fault',
+                'paged out', 'virtual memory', 'working set', 'memory pressure'
             ],
             'connectivity': [
                 'connection failed', 'login failed', 'timeout expired',
-                'network error', 'communication link'
+                'network error', 'communication link', 'connection timeout'
             ],
             'corruption': [
-                'corruption', 'checksum', 'torn page', 'consistency error'
+                'corruption', 'checksum', 'torn page', 'consistency error',
+                'corrupt page', 'database consistency'
+            ],
+            'performance': [
+                'slow', 'performance', 'high CPU', 'long running', 'blocking',
+                'wait', 'resource semaphore', 'query timeout', 'plan cache'
             ]
         }
         
@@ -170,61 +176,62 @@ class LogAnalyzer:
         Returns:
             List of error log entries
         """
-        query = """
-        DECLARE @StartDate DATETIME = ?
-        DECLARE @EndDate DATETIME = ?
-        
-        CREATE TABLE #ErrorLog (
-            LogDate DATETIME,
-            ProcessInfo NVARCHAR(50),
-            Text NVARCHAR(MAX)
-        )
-        
-        -- Read current error log
-        INSERT INTO #ErrorLog
-        EXEC xp_readerrorlog 0, 1, NULL, NULL, @StartDate, @EndDate
-        
-        -- Read previous error log files (up to 6 files back)
-        INSERT INTO #ErrorLog
-        EXEC xp_readerrorlog 1, 1, NULL, NULL, @StartDate, @EndDate
-        
-        INSERT INTO #ErrorLog
-        EXEC xp_readerrorlog 2, 1, NULL, NULL, @StartDate, @EndDate
-        
-        INSERT INTO #ErrorLog
-        EXEC xp_readerrorlog 3, 1, NULL, NULL, @StartDate, @EndDate
-        
-        -- Extract severity and error information
-        SELECT 
-            LogDate,
-            ProcessInfo,
-            Text,
-            -- Extract severity level from text (format: "Error: 1234, Severity: 16, State: 1")
-            CASE 
-                WHEN Text LIKE '%Severity: %' THEN
-                    CAST(SUBSTRING(Text, CHARINDEX('Severity: ', Text) + 10, 2) AS INT)
-                ELSE 0
-            END AS Severity,
-            -- Extract error number
-            CASE 
-                WHEN Text LIKE '%Error: %' THEN
-                    CAST(SUBSTRING(Text, CHARINDEX('Error: ', Text) + 7, 
-                         CHARINDEX(',', Text, CHARINDEX('Error: ', Text)) - CHARINDEX('Error: ', Text) - 7) AS INT)
-                ELSE 0
-            END AS ErrorNumber
-        FROM #ErrorLog
-        WHERE LogDate BETWEEN @StartDate AND @EndDate
-            AND Text NOT LIKE '%Backup%' -- Exclude routine backup messages
-            AND Text NOT LIKE '%Log was backed up%'
-            AND Text NOT LIKE '%Database backed up%'
-        ORDER BY LogDate DESC
-        
-        DROP TABLE #ErrorLog
-        """
-        
         try:
             cursor = self.connection.connection.cursor()
-            cursor.execute(query, (start_date, end_date))
+            
+            # Create temp table
+            cursor.execute("""
+                CREATE TABLE #ErrorLog (
+                    LogDate DATETIME,
+                    ProcessInfo NVARCHAR(50),
+                    Text NVARCHAR(MAX)
+                )
+            """)
+            
+            # Read current error log
+            cursor.execute("INSERT INTO #ErrorLog EXEC xp_readerrorlog 0, 1")
+            
+            # Read previous error log files (up to 3 files back)
+            try:
+                cursor.execute("INSERT INTO #ErrorLog EXEC xp_readerrorlog 1, 1")
+                cursor.execute("INSERT INTO #ErrorLog EXEC xp_readerrorlog 2, 1")
+                cursor.execute("INSERT INTO #ErrorLog EXEC xp_readerrorlog 3, 1")
+            except:
+                # Some error log files may not exist, continue
+                pass
+            
+            # Extract and filter entries
+            cursor.execute("""
+                SELECT 
+                    LogDate,
+                    ProcessInfo,
+                    Text,
+                    -- Extract severity level from text or classify based on keywords
+                    CASE 
+                        WHEN Text LIKE '%Severity: %' THEN
+                            TRY_CAST(SUBSTRING(Text, CHARINDEX('Severity: ', Text) + 10, 2) AS INT)
+                        -- Classify based on keywords if no explicit severity
+                        WHEN Text LIKE '%error%' OR Text LIKE '%failed%' OR Text LIKE '%exception%' THEN 16
+                        WHEN Text LIKE '%warning%' OR Text LIKE '%paged out%' OR Text LIKE '%timeout%' THEN 14
+                        WHEN Text LIKE '%deadlock%' OR Text LIKE '%blocking%' THEN 20
+                        ELSE 10
+                    END AS Severity,
+                    -- Extract error number
+                    CASE 
+                        WHEN Text LIKE '%Error: %' THEN
+                            TRY_CAST(SUBSTRING(Text, CHARINDEX('Error: ', Text) + 7, 
+                                 CHARINDEX(',', Text, CHARINDEX('Error: ', Text)) - CHARINDEX('Error: ', Text) - 7) AS INT)
+                        ELSE 0
+                    END AS ErrorNumber
+                FROM #ErrorLog
+                WHERE LogDate BETWEEN ? AND ?
+                    AND Text NOT LIKE '%Backup%' -- Exclude routine backup messages
+                    AND Text NOT LIKE '%Log was backed up%'
+                    AND Text NOT LIKE '%Database backed up%'
+                    AND Text NOT LIKE '%Log was restored%'
+                    AND ProcessInfo NOT LIKE '%Backup%'
+                ORDER BY LogDate DESC
+            """, (start_date, end_date))
             
             entries = []
             for row in cursor.fetchall():
@@ -236,6 +243,8 @@ class LogAnalyzer:
                     'error_number': row.ErrorNumber or 0
                 })
             
+            # Clean up temp table
+            cursor.execute("DROP TABLE #ErrorLog")
             cursor.close()
             return entries
             
