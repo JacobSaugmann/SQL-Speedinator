@@ -20,6 +20,7 @@ from ..analyzers.wait_stats_analyzer import WaitStatsAnalyzer
 from ..analyzers.missing_index_analyzer import MissingIndexAnalyzer
 from ..analyzers.ai_analyzer import AIAnalyzer
 from ..analyzers.server_database_analyzer import ServerDatabaseAnalyzer
+from ..analyzers.intelligent_recommendations import IntelligentRecommendationsEngine
 
 class PerformanceAnalyzer:
     """Main class for coordinating SQL Server performance analysis"""
@@ -43,12 +44,12 @@ class PerformanceAnalyzer:
         self.advanced_index_analyzer = AdvancedIndexAnalyzer(connection)
         self.server_config_analyzer = ServerConfigAnalyzer(connection, config)
         self.tempdb_analyzer = TempDBAnalyzer(connection, config)
-        self.index_analyzer = IndexAnalyzer(connection, config)
-        self.server_config_analyzer = ServerConfigAnalyzer(connection, config)
-        self.tempdb_analyzer = TempDBAnalyzer(connection, config)
         self.plan_cache_analyzer = PlanCacheAnalyzer(connection, config)
         self.wait_stats_analyzer = WaitStatsAnalyzer(connection, config)
         self.missing_index_analyzer = MissingIndexAnalyzer(connection, config)
+        self.server_database_analyzer = ServerDatabaseAnalyzer(connection, config)
+        self.ai_analyzer = AIAnalyzer(config)
+        self.intelligent_recommendations = IntelligentRecommendationsEngine(config)
         self.ai_analyzer = AIAnalyzer(config)
         self.server_database_analyzer = ServerDatabaseAnalyzer(connection, config)
         
@@ -125,6 +126,38 @@ class PerformanceAnalyzer:
         # Generate summary and recommendations
         self.analysis_results['summary'] = self._generate_summary()
         self.analysis_results['recommendations'] = self._generate_recommendations()
+        
+        # Generate intelligent correlation analysis and enhanced recommendations
+        try:
+            self.logger.info("Running intelligent correlation analysis...")
+            correlation_start = datetime.now()
+            correlation_results = self.intelligent_recommendations.analyze_correlations(self.analysis_results)
+            correlation_duration = (datetime.now() - correlation_start).total_seconds()
+            
+            if correlation_results:
+                self.analysis_results['intelligent_correlations'] = correlation_results
+                self.logger.info(f"Intelligent correlation analysis completed in {correlation_duration:.2f} seconds")
+                
+                # Add correlated recommendations to existing recommendations
+                if 'recommendations' in correlation_results:
+                    if 'recommendations' not in self.analysis_results:
+                        self.analysis_results['recommendations'] = []
+                    
+                    # Add intelligent recommendations with priority markers
+                    for rec in correlation_results['recommendations']:
+                        rec['source'] = 'intelligent_correlation'
+                        self.analysis_results['recommendations'].append(rec)
+                    
+                    self.logger.info(f"Added {len(correlation_results['recommendations'])} intelligent recommendations")
+            else:
+                self.logger.warning("Intelligent correlation analysis returned no results")
+                
+        except Exception as e:
+            self.logger.error(f"Error during intelligent correlation analysis: {e}", exc_info=True)
+            self.analysis_results['intelligent_correlations'] = {
+                'error': str(e),
+                'timestamp': datetime.now()
+            }
         
         # Update summary with recommendations count
         if 'recommendations' in self.analysis_results:

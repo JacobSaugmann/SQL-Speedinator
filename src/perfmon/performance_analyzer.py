@@ -29,29 +29,44 @@ class PerformanceCounterAnalyzer:
             # CPU thresholds
             'cpu_high': 80.0,  # % Processor Time
             'cpu_critical': 95.0,
+            'processor_queue_length_high': 2.0,
             
             # Memory thresholds
             'memory_available_low': 200,  # MB
             'memory_available_critical': 100,
-            'page_life_expectancy_low': 300,  # seconds
+            'page_life_expectancy_low': 300,  # seconds - CRITICAL THRESHOLD
             'page_life_expectancy_critical': 60,
+            'pages_per_sec_high': 20,  # Memory pressure indicator
             
-            # Disk thresholds
-            'disk_queue_length_high': 2.0,
+            # Disk I/O and Latency thresholds (as per requirements)
+            'disk_queue_length_high': 2.0,  # Per disk - CRITICAL THRESHOLD
             'disk_queue_length_critical': 10.0,
-            'disk_sec_per_read_slow': 0.015,  # 15ms
-            'disk_sec_per_read_critical': 0.025,  # 25ms
-            'disk_sec_per_write_slow': 0.015,
-            'disk_sec_per_write_critical': 0.025,
+            'disk_sec_per_read_slow': 0.010,  # 10ms - GOOD threshold
+            'disk_sec_per_read_critical': 0.020,  # 20ms - CRITICAL threshold
+            'disk_sec_per_write_slow': 0.010,  # 10ms - GOOD threshold  
+            'disk_sec_per_write_critical': 0.020,  # 20ms - CRITICAL threshold
+            'disk_time_high': 80.0,  # % Disk Time > 80% = bottleneck
+            'disk_time_critical': 95.0,
             
-            # SQL Server thresholds
+            # SQL Server-specific thresholds
             'buffer_cache_hit_ratio_low': 95.0,  # %
             'buffer_cache_hit_ratio_critical': 90.0,
+            'page_life_expectancy_memory_pressure': 300,  # PLE < 300 = memory pressure
+            'lazy_writes_per_sec_high': 20,  # Memory pressure indicator
+            'checkpoint_pages_per_sec_high': 100,  # Frequent flushes
+            'page_splits_per_sec_high': 20,  # Fragmentation/poor indexing
+            'log_flushes_per_sec_high': 20,  # Heavy transaction log activity
             'batch_requests_per_sec_high': 1000,
             'compilations_per_sec_high': 100,
             'recompilations_per_sec_high': 10,
             'lock_waits_per_sec_high': 1.0,
+            'lock_wait_time_ms_high': 100,
             'deadlocks_per_sec_high': 0.1,
+            'memory_grants_pending_high': 1,
+            'processes_blocked_high': 1,
+            
+            # Disk Throughput thresholds
+            'disk_bytes_per_sec_high': 100000000,  # 100MB/s baseline
             
             # Network thresholds
             'network_utilization_high': 70.0,  # % of bandwidth
