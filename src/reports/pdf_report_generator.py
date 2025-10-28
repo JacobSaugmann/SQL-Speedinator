@@ -461,7 +461,12 @@ class PDFReportGenerator:
             
             # Disk Performance Analysis
             if 'disk_performance' in analysis_results:
-                story.extend(self._create_disk_analysis_section(analysis_results['disk_performance']))
+                disk_data = analysis_results['disk_performance']
+                # Extract the actual data from the wrapper
+                if isinstance(disk_data, dict) and 'data' in disk_data:
+                    story.extend(self._create_disk_analysis_section(disk_data['data']))
+                else:
+                    story.extend(self._create_disk_analysis_section(disk_data))
             
             # Index Analysis
             if 'index_analysis' in analysis_results and 'data' in analysis_results['index_analysis']:
@@ -503,7 +508,12 @@ class PDFReportGenerator:
             
             # Log Analysis Section
             if 'log_analysis' in analysis_results:
-                story.extend(self._create_log_analysis_section(analysis_results['log_analysis']))
+                log_data = analysis_results['log_analysis']
+                # Extract the actual data from the wrapper
+                if isinstance(log_data, dict) and 'data' in log_data:
+                    story.extend(self._create_log_analysis_section(log_data['data']))
+                else:
+                    story.extend(self._create_log_analysis_section(log_data))
             
             # Build PDF
             doc.build(story)
@@ -712,7 +722,8 @@ class PDFReportGenerator:
         
         story.append(Paragraph("💾 Disk Performance Analysis", self.styles['KeepTogetherSection']))
         
-        io_stats = disk_performance.get('io_statistics', [])
+        # Use correct key name for disk statistics
+        io_stats = disk_performance.get('sql_disk_stats', disk_performance.get('io_statistics', []))
         if io_stats:
             avg_read_latency = sum(stat.get('avg_read_latency_ms', 0) for stat in io_stats) / len(io_stats)
             avg_write_latency = sum(stat.get('avg_write_latency_ms', 0) for stat in io_stats) / len(io_stats)
