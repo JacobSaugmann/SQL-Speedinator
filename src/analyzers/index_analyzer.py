@@ -113,7 +113,7 @@ class IndexAnalyzer:
         
         try:
             for db_name in user_databases:
-                self.logger.debug(f"Analyzing unused indexes in database: {db_name}")
+                self.logger.info(f"Analyzing unused indexes in database: {db_name}")
                 
                 # Change to user database
                 if not self.connection.change_database(db_name):

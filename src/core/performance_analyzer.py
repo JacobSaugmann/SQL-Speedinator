@@ -20,6 +20,7 @@ from ..analyzers.wait_stats_analyzer import WaitStatsAnalyzer
 from ..analyzers.missing_index_analyzer import MissingIndexAnalyzer
 from ..analyzers.ai_analyzer import AIAnalyzer
 from ..analyzers.server_database_analyzer import ServerDatabaseAnalyzer
+from ..analyzers.log_analyzer import LogAnalyzer
 from ..analyzers.intelligent_recommendations import IntelligentRecommendationsEngine
 
 class PerformanceAnalyzer:
@@ -48,10 +49,9 @@ class PerformanceAnalyzer:
         self.wait_stats_analyzer = WaitStatsAnalyzer(connection, config)
         self.missing_index_analyzer = MissingIndexAnalyzer(connection, config)
         self.server_database_analyzer = ServerDatabaseAnalyzer(connection, config)
+        self.log_analyzer = LogAnalyzer(connection, config)
         self.ai_analyzer = AIAnalyzer(config)
         self.intelligent_recommendations = IntelligentRecommendationsEngine(config)
-        self.ai_analyzer = AIAnalyzer(config)
-        self.server_database_analyzer = ServerDatabaseAnalyzer(connection, config)
         
         self.analysis_results = {}
     
@@ -84,6 +84,7 @@ class PerformanceAnalyzer:
             ('server_config', 'Server Configuration Analysis', self.server_config_analyzer.analyze),
             ('tempdb_analysis', 'TempDB Analysis', self.tempdb_analyzer.analyze),
             ('plan_cache', 'Plan Cache Analysis', self.plan_cache_analyzer.analyze),
+            ('log_analysis', 'Log Analysis (SQL Server & Windows Events)', self.log_analyzer.analyze_logs),
         ]
         
         # Execute analysis steps
@@ -120,6 +121,9 @@ class PerformanceAnalyzer:
         analysis_duration = (datetime.now() - analysis_start).total_seconds()
         self.analysis_results['analysis_metadata']['end_time'] = datetime.now()
         self.analysis_results['analysis_metadata']['total_duration_seconds'] = analysis_duration
+        
+        # Add database count to metadata
+        self._update_metadata()
         
         self.logger.info(f"Complete analysis finished in {analysis_duration:.2f} seconds")
         
@@ -438,3 +442,25 @@ class PerformanceAnalyzer:
         except Exception as e:
             self.logger.error(f"Advanced index analysis failed: {e}")
             return {'error': str(e)}
+    
+    def _update_metadata(self):
+        """Update analysis metadata with computed values"""
+        try:
+            # Calculate database count from server_database_info
+            server_db_info = self.analysis_results.get('server_database_info', {})
+            if 'data' in server_db_info:
+                database_overview = server_db_info['data'].get('database_overview', [])
+                databases_count = len(database_overview) if database_overview else 0
+                self.analysis_results['analysis_metadata']['databases_count'] = databases_count
+                
+                if databases_count > 0:
+                    self.logger.info(f"Analysis included {databases_count} user databases")
+                else:
+                    self.logger.warning("No user databases found in analysis")
+            else:
+                self.analysis_results['analysis_metadata']['databases_count'] = 0
+                self.logger.warning("Server database info not available for metadata")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating metadata: {e}")
+            self.analysis_results['analysis_metadata']['databases_count'] = 0

@@ -427,16 +427,16 @@ class PDFReportGenerator:
                 story.extend(self._create_server_info_section(analysis_results))
             
             # Wait Statistics Analysis
-            if 'wait_stats' in analysis_results:
-                story.extend(self._create_wait_stats_section(analysis_results['wait_stats']))
+            if 'wait_stats' in analysis_results and 'data' in analysis_results['wait_stats']:
+                story.extend(self._create_wait_stats_section(analysis_results['wait_stats']['data']))
             
             # Disk Performance Analysis
             if 'disk_performance' in analysis_results:
                 story.extend(self._create_disk_analysis_section(analysis_results['disk_performance']))
             
             # Index Analysis
-            if 'index_analysis' in analysis_results:
-                story.extend(self._create_index_analysis_section(analysis_results['index_analysis']))
+            if 'index_analysis' in analysis_results and 'data' in analysis_results['index_analysis']:
+                story.extend(self._create_index_analysis_section(analysis_results['index_analysis']['data']))
             
             # Missing Index Analysis
             if 'missing_indexes' in analysis_results:
@@ -471,6 +471,10 @@ class PDFReportGenerator:
             # Performance Monitor Analysis Section
             if 'perfmon_analysis' in analysis_results:
                 story.extend(self._create_perfmon_analysis_section(analysis_results['perfmon_analysis']))
+            
+            # Log Analysis Section
+            if 'log_analysis' in analysis_results:
+                story.extend(self._create_log_analysis_section(analysis_results['log_analysis']))
             
             # Build PDF
             doc.build(story)
@@ -619,40 +623,54 @@ class PDFReportGenerator:
         
         story.append(Paragraph("⏱️ Wait Statistics Analysis", self.styles['KeepTogetherSection']))
         
-        wait_types = wait_stats.get('wait_types', [])
-        if wait_types:
-            high_waits = [w for w in wait_types if w.get('wait_time_ms', 0) > 10000]
-            if high_waits:
+        # Get current waits - this is the actual data structure from the analyzer
+        current_waits = wait_stats.get('current_waits', [])
+        high_waits = wait_stats.get('high_waits', [])
+        wait_analysis = wait_stats.get('wait_analysis', {})
+        
+        if current_waits:
+            # Summary paragraph
+            total_waits = len(current_waits)
+            high_count = len(high_waits) if high_waits else 0
+            summary_text = f"Analyzed {total_waits} wait types. "
+            
+            if high_count > 0:
+                summary_text += f"Found {high_count} high-impact wait types requiring attention."
                 story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
-                summary_text = f"Analyzed {len(wait_types)} wait types. Found {len(high_waits)} high-impact wait types requiring attention."
-                story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+            else:
+                summary_text += "No critical wait types detected."
+                story.append(Paragraph("Status: Good", self.styles['SubHeader']))
+                
+            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+        else:
+            story.append(Paragraph("No wait statistics data available.", self.styles['BodyText']))
+            story.append(Spacer(1, 0.02*inch))
+            return story
         
         story.append(Spacer(1, 0.02*inch))
         
         # Wait Types Analysis
-        if wait_types:
-            story.append(Paragraph("📊 Wait Types Analysis", self.styles['KeepTogetherSub']))
+        if current_waits:
+            story.append(Paragraph("📊 Top Wait Types", self.styles['KeepTogetherSub']))
             
             # Create compact table for wait types
-            table_data = [['Wait Type', 'Wait Time (ms)', 'Tasks', 'Signal Time', '%']]
+            table_data = [['Wait Type', 'Wait Time (ms)', 'Wait Count', 'Avg Wait (ms)']]
             
-            # Calculate total wait time for percentage
-            total_wait_time = sum(w.get('wait_time_ms', 0) for w in wait_types)
-            
-            for wait in wait_types[:10]:  # Top 10
+            for wait in current_waits[:10]:  # Top 10
+                wait_type = wait.get('wait_type', 'Unknown')
                 wait_time = wait.get('wait_time_ms', 0)
-                percentage = (wait_time / total_wait_time * 100) if total_wait_time > 0 else 0
+                wait_count = wait.get('waiting_tasks_count', 0)
+                avg_wait = (wait_time / wait_count) if wait_count > 0 else 0
                 
                 table_data.append([
-                    wait.get('wait_type', 'Unknown')[:20],  # Truncate long names
+                    wait_type,
                     f"{wait_time:,.0f}",
-                    str(wait.get('waiting_tasks_count', 0)),
-                    f"{wait.get('signal_wait_time_ms', 0):,.0f}",
-                    f"{percentage:.1f}%"
+                    f"{wait_count:,}",
+                    f"{avg_wait:.1f}"
                 ])
             
             # Use responsive column widths for better fit
-            wait_table = Table(table_data, colWidths=self._get_responsive_column_widths(5))
+            wait_table = Table(table_data, colWidths=self._get_responsive_column_widths(4))
             wait_table.setStyle(self._get_modern_table_style())
             story.append(wait_table)
             story.append(Spacer(1, 0.02*inch))
@@ -739,6 +757,13 @@ class PDFReportGenerator:
                 """
             
             story.append(Paragraph(frag_summary, self.styles['ExecutiveSummary']))
+        else:
+            story.append(Paragraph("Status: Good", self.styles['SubHeader']))
+            summary_text = f"""
+            Index analysis completed on all user databases. No critical fragmentation issues detected. 
+            Current indexing strategy appears well-maintained.
+            """
+            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
         
         story.append(Spacer(1, 0.02*inch))
         
@@ -825,7 +850,7 @@ class PDFReportGenerator:
             missing_indexes = []
             
         if missing_indexes:
-            story.append(Paragraph("Executive Summary", self.styles['SubHeader']))
+            story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
             
             # Handle different ways impact might be stored
             high_impact = []
@@ -839,10 +864,14 @@ class PDFReportGenerator:
             {len(high_impact)} have high performance impact and should be prioritized.
             """
             story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+        else:
+            story.append(Paragraph("Status: Good", self.styles['SubHeader']))
+            story.append(Paragraph("No missing indexes detected. Current indexing strategy appears adequate.", self.styles['ExecutiveSummary']))
             
-            story.append(Spacer(1, 0.02*inch))
-            
-            # Missing indexes table
+        story.append(Spacer(1, 0.02*inch))
+        
+        # Missing indexes table (only if there are any)
+        if missing_indexes:
             table_data = [['Database.Table', 'Equality Columns', 'Impact', 'Seeks', 'Priority']]
             
             for idx in missing_indexes[:8]:  # Top 8
@@ -1519,6 +1548,154 @@ class PDFReportGenerator:
             if 'correlation_analysis' in ai_data:
                 story.append(Paragraph("🔗 Cross-Component Analysis", self.styles['NormalText']))
                 story.append(Paragraph(ai_data['correlation_analysis'], self.styles['NormalText']))
+                story.append(Spacer(1, 0.05*inch))
+        
+        return story
+
+    def _create_log_analysis_section(self, log_data: Dict[str, Any]) -> List:
+        """Create log analysis section for PDF report
+        
+        Args:
+            log_data: Log analysis results
+            
+        Returns:
+            List of reportlab elements
+        """
+        story = []
+        
+        # Section header
+        story.append(Paragraph("📋 Log Analysis (Last 7 Days)", self.styles['SectionHeader']))
+        story.append(Spacer(1, 0.05*inch))
+        
+        if log_data.get('error'):
+            story.append(Paragraph(f"⚠️ Error: {log_data['error']}", self.styles['NormalText']))
+            story.append(Spacer(1, 0.05*inch))
+            return story
+        
+        # Summary section
+        if 'summary' in log_data:
+            summary = log_data['summary']
+            story.append(Paragraph("📊 Summary", self.styles['SubHeader']))
+            
+            summary_text = f"""
+            • SQL Server Entries: {summary.get('total_sql_entries', 0):,}
+            • Critical Errors (Severity ≥ 16): {summary.get('critical_sql_errors', 0):,}
+            • Performance Issue Categories: {summary.get('performance_issue_categories', 0)}
+            • Windows Events: {summary.get('total_windows_events', 0):,}
+            • Event Categories: {summary.get('windows_categories', 0)}
+            """
+            story.append(Paragraph(summary_text, self.styles['NormalText']))
+            story.append(Spacer(1, 0.05*inch))
+        
+        # SQL Server Error Log Analysis
+        if 'sql_server_errors' in log_data:
+            sql_errors = log_data['sql_server_errors']
+            story.append(Paragraph("🔴 SQL Server Error Log Analysis", self.styles['SubHeader']))
+            
+            # Critical errors table
+            critical_errors = sql_errors.get('critical_errors', [])
+            if critical_errors:
+                story.append(Paragraph(f"Critical Errors ({len(critical_errors)} found):", self.styles['NormalText']))
+                
+                # Create table for critical errors (show first 10)
+                critical_data = [['Date/Time', 'Severity', 'Error #', 'Description']]
+                for error in critical_errors[:10]:  # Limit to first 10
+                    date_str = error.get('log_date', '').strftime('%m/%d %H:%M') if error.get('log_date') else 'Unknown'
+                    severity = error.get('severity', 0)
+                    error_num = error.get('error_number', 0)
+                    description = error.get('text', '')[:80] + '...' if len(error.get('text', '')) > 80 else error.get('text', '')
+                    
+                    critical_data.append([
+                        self._create_table_paragraph(date_str),
+                        self._create_table_paragraph(f"🔴 {severity}"),
+                        self._create_table_paragraph(str(error_num) if error_num else 'N/A'),
+                        self._create_table_paragraph(description)
+                    ])
+                
+                critical_table = Table(critical_data, colWidths=self._get_responsive_column_widths(4))
+                critical_table.setStyle(self._get_modern_table_style())
+                story.append(critical_table)
+                story.append(Spacer(1, 0.05*inch))
+            
+            # Performance issues breakdown
+            performance_issues = sql_errors.get('performance_issues', {})
+            if performance_issues:
+                story.append(Paragraph("⚡ Performance Issues Detected:", self.styles['NormalText']))
+                
+                perf_data = [['Issue Type', 'Count', 'Latest Occurrence', 'Impact']]
+                
+                impact_map = {
+                    'deadlocks': ('🔴', 'HIGH - Query blocking'),
+                    'io_errors': ('🔴', 'HIGH - Disk subsystem'),
+                    'autogrow': ('🟠', 'MEDIUM - Performance spikes'),
+                    'memory': ('🟠', 'MEDIUM - Resource pressure'),
+                    'connectivity': ('🟡', 'LOW - User experience'),
+                    'corruption': ('🔴', 'CRITICAL - Data integrity')
+                }
+                
+                for issue_type, issues in performance_issues.items():
+                    if issues:
+                        emoji, impact = impact_map.get(issue_type, ('🔵', 'INFO'))
+                        latest = max(issues, key=lambda x: x.get('log_date', datetime.min))
+                        latest_date = latest.get('log_date', '').strftime('%m/%d %H:%M') if latest.get('log_date') else 'Unknown'
+                        
+                        perf_data.append([
+                            self._create_table_paragraph(issue_type.replace('_', ' ').title()),
+                            self._create_table_paragraph(f"{emoji} {len(issues)}"),
+                            self._create_table_paragraph(latest_date),
+                            self._create_table_paragraph(impact)
+                        ])
+                
+                if len(perf_data) > 1:  # More than just header
+                    perf_table = Table(perf_data, colWidths=self._get_responsive_column_widths(4))
+                    perf_table.setStyle(self._get_modern_table_style())
+                    story.append(perf_table)
+                    story.append(Spacer(1, 0.05*inch))
+        
+        # Windows Event Log Analysis
+        if 'windows_events' in log_data:
+            windows_events = log_data['windows_events']
+            categorized = windows_events.get('categorized_events', {})
+            
+            if categorized:
+                story.append(Paragraph("🪟 Windows Event Log Analysis", self.styles['SubHeader']))
+                
+                event_data = [['Category', 'Count', 'Severity', 'Description']]
+                
+                category_descriptions = {
+                    'disk_errors': ('🔴', 'Hardware/storage failures detected'),
+                    'storage_warnings': ('🟠', 'Storage performance degradation'),
+                    'sql_service_issues': ('🟠', 'SQL Server service problems'),
+                    'performance_warnings': ('🟡', 'System performance concerns'),
+                    'other': ('🔵', 'General system events')
+                }
+                
+                for category, events in categorized.items():
+                    if events:
+                        emoji, description = category_descriptions.get(category, ('🔵', 'System events'))
+                        
+                        event_data.append([
+                            self._create_table_paragraph(category.replace('_', ' ').title()),
+                            self._create_table_paragraph(f"{len(events)}"),
+                            self._create_table_paragraph(emoji),
+                            self._create_table_paragraph(description)
+                        ])
+                
+                if len(event_data) > 1:  # More than just header
+                    event_table = Table(event_data, colWidths=self._get_responsive_column_widths(4))
+                    event_table.setStyle(self._get_modern_table_style())
+                    story.append(event_table)
+                    story.append(Spacer(1, 0.05*inch))
+        
+        # Recommendations
+        if 'recommendations' in log_data:
+            recommendations = log_data['recommendations']
+            if recommendations:
+                story.append(Paragraph("💡 Log Analysis Recommendations", self.styles['SubHeader']))
+                
+                for i, recommendation in enumerate(recommendations[:8], 1):  # Limit to 8 recommendations
+                    story.append(Paragraph(f"{i}. {recommendation}", self.styles['NormalText']))
+                
                 story.append(Spacer(1, 0.05*inch))
         
         return story

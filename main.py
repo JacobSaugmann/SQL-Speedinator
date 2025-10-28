@@ -27,24 +27,46 @@ from src.core.config_manager import ConfigManager
 from src.core.scheduler import AnalysisScheduler
 from src.core.file_cleanup_manager import FileCleanupManager
 
-def setup_logging(night_mode=False):
+# Global variable to track verbose mode
+VERBOSE_MODE = False
+
+def setup_logging(night_mode=False, verbose=False):
     """Setup logging configuration"""
-    log_level = logging.INFO if not night_mode else logging.WARNING
-    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    global VERBOSE_MODE
+    VERBOSE_MODE = verbose
+    
+    if verbose:
+        log_level = logging.DEBUG if not night_mode else logging.WARNING
+        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        console_handler = logging.StreamHandler(sys.stdout)
+        # Set root logger to DEBUG to capture all debug messages
+        root_log_level = logging.DEBUG
+    else:
+        # Simplified output for normal mode - only show ERROR and above
+        log_level = logging.ERROR if not night_mode else logging.ERROR
+        log_format = '%(message)s'  # Simple format without timestamps
+        console_handler = logging.StreamHandler(sys.stdout)
+        root_log_level = logging.INFO
     
     # Create logs directory if it doesn't exist
     logs_dir = Path("logs")
     logs_dir.mkdir(exist_ok=True)
     
-    # Configure logging
-    logging.basicConfig(
-        level=log_level,
-        format=log_format,
-        handlers=[
-            logging.FileHandler(logs_dir / f"sql_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
+    # File handler always gets detailed format
+    file_handler = logging.FileHandler(logs_dir / f"sql_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Console handler respects verbose setting
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(logging.Formatter(log_format))
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(root_log_level)
+    root_logger.handlers.clear()  # Clear any existing handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
 
 def main():
     """Main function"""
@@ -54,10 +76,10 @@ def main():
         epilog="""
 Examples:
   python main.py -s SQLSERVER01
-  python main.py -s SQLSERVER01 -n --output ./custom_reports
+  python main.py -s SQLSERVER01 -n --output ./custom_reports --verbose
   python main.py -s SQLSERVER01 --schedule
   python main.py -s SQLSERVER01 --perfmon-file "C:\\PerfLogs\\sql_perf.blg"
-  python main.py -s SQLSERVER01 --perfmon-duration 120 --ai-analysis
+  python main.py -s SQLSERVER01 --perfmon-duration 120 --ai-analysis --verbose
   python main.py -s SQLSERVER01 --cleanup-retention-days 7
   python main.py -s SQLSERVER01 --cleanup-preview
   python main.py -s SQLSERVER01 --disable-cleanup
@@ -130,9 +152,17 @@ Examples:
         action="store_true",
         help="Show what files would be cleaned up without actually deleting them"
     )
+    
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output with detailed logging"
+    )
 
-    args = parser.parse_args()    # Setup logging
-    setup_logging(args.night_mode)
+    args = parser.parse_args()
+    
+    # Setup logging
+    setup_logging(args.night_mode, args.verbose)
     logger = logging.getLogger(__name__)
     
     try:
@@ -142,6 +172,8 @@ Examples:
         # Perform automatic file cleanup before starting analysis
         if not args.disable_cleanup:
             logger.info("Performing automatic file cleanup...")
+            if not VERBOSE_MODE:
+                print("🧹 Performing file cleanup...")
             cleanup_manager = FileCleanupManager(config)
             
             # Configure cleanup settings based on command line args
@@ -170,6 +202,8 @@ Examples:
         else:
             # Run single analysis
             logger.info(f"Starting SQL Server analysis for: {args.server}")
+            if not VERBOSE_MODE:
+                print(f"🚀 Starting SQL Server analysis for: {args.server}")
             run_analysis(args.server, output_path, config, args.night_mode, args.ai_analysis, args.perfmon_file, args.perfmon_duration)
             
     except KeyboardInterrupt:
@@ -185,17 +219,24 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
     """Run a single analysis"""
     logger = logging.getLogger(__name__)
     
+    def simple_print(message):
+        """Print simple message only in non-verbose mode"""
+        if not VERBOSE_MODE:
+            print(message)
+    
     # Enable AI analysis if requested via command line
     if ai_analysis:
         # Temporarily override the AI_ANALYSIS_ENABLED setting
         import os
         os.environ['AI_ANALYSIS_ENABLED'] = 'true'
         logger.info("AI analysis enabled via command line flag")
+        simple_print("🧠 AI Analysis: Enabled")
     
     # Initialize PerfMon analysis if requested
     perfmon_results = None
     if perfmon_file:
         logger.info(f"Analyzing Performance Monitor data from: {perfmon_file}")
+        simple_print(f"📊 Analyzing Performance Monitor data from: {perfmon_file}")
         from src.perfmon.performance_analyzer import PerformanceCounterAnalyzer
         perfmon_analyzer = PerformanceCounterAnalyzer(config)
         perfmon_results = perfmon_analyzer.analyze_performance_log(perfmon_file)
@@ -205,9 +246,11 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
             perfmon_results = None
         else:
             logger.info("Performance Monitor analysis completed successfully")
+            simple_print("✅ Performance Monitor analysis completed")
     elif perfmon_duration and perfmon_duration > 0:
         # Start automatic PerfMon data collection if no file provided but duration specified
         logger.info(f"Starting automatic Performance Monitor data collection for {perfmon_duration} minutes...")
+        simple_print(f"📊 Starting Performance Monitor data collection ({perfmon_duration} minutes)...")
         perfmon_data_file = None
         collection_name = None
         
@@ -343,18 +386,22 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
     
     # Create connection
     logger.info("Establishing SQL Server connection...")
+    simple_print(f"🔗 Connecting to SQL Server: {server_name}")
     with SQLServerConnection(server_name, config) as conn:
         if not conn.test_connection():
             raise Exception("Failed to connect to SQL Server")
         
         logger.info("Connection established successfully")
+        simple_print("✅ Connection established")
         
         # Initialize analyzer
         analyzer = PerformanceAnalyzer(conn, config, night_mode)
         
         # Run analysis
         logger.info("Starting performance analysis...")
+        simple_print("🔍 Running SQL Server performance analysis...")
         analysis_results = analyzer.run_full_analysis()
+        simple_print("✅ Performance analysis completed")
         
         # Add PerfMon results to analysis if available
         if perfmon_results:
@@ -363,6 +410,7 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
             # Run AI analysis on PerfMon data if AI is enabled
             if ai_analysis:
                 logger.info("Running AI analysis on Performance Monitor data...")
+                simple_print("🧠 Running AI analysis on Performance Monitor data...")
                 from src.services.ai_service import AIService
                 ai_service = AIService(config)
                 perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
@@ -370,11 +418,26 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
                 if perfmon_ai_analysis:
                     analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
                     logger.info("AI Performance Monitor analysis completed")
+                    simple_print("✅ AI Performance Monitor analysis completed")
                 else:
                     logger.info("AI Performance Monitor analysis skipped or failed")
         
+        # Run AI analysis on log data if AI is enabled and log analysis was performed
+        if ai_analysis and 'log_analysis' in analysis_results:
+            logger.info("Running AI analysis on log data...")
+            from src.services.ai_service import AIService
+            ai_service = AIService(config)
+            log_ai_analysis = ai_service.analyze_log_entries(analysis_results['log_analysis'])
+            
+            if log_ai_analysis:
+                analysis_results['log_analysis']['ai_analysis'] = log_ai_analysis
+                logger.info("AI log analysis completed")
+            else:
+                logger.info("AI log analysis skipped or failed")
+        
         # Generate report
         logger.info("Generating PDF report...")
+        simple_print("📄 Generating PDF report...")
         report_generator = PDFReportGenerator(config)
         
         # Create output filename
@@ -390,6 +453,8 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
         
         logger.info(f"Analysis completed successfully!")
         logger.info(f"Report saved to: {report_path}")
+        simple_print(f"✅ Analysis completed!")
+        simple_print(f"📋 Report saved to: {report_path}")
 
 if __name__ == "__main__":
     sys.exit(main())

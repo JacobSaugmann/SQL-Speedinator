@@ -6,7 +6,8 @@ Provides AI-powered analysis and recommendations using Azure OpenAI GPT models
 import logging
 import json
 import re
-from typing import Dict, Any, Optional
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from openai import AzureOpenAI
 try:
     from ..core.config_manager import ConfigManager
@@ -55,7 +56,7 @@ class AIService:
                     self.logger.info("Azure OpenAI client initialized")
                     
                 except Exception as e:
-                    self.logger.warning(f"Basic initialization failed ({str(e)}), trying with custom HTTP client...")
+                    self.logger.debug(f"Basic initialization failed ({str(e)}), trying with custom HTTP client...")
                     
                     # Create custom HTTP client without proxy settings
                     custom_client = httpx.Client(
@@ -397,3 +398,178 @@ class AIService:
         prompt += "Provide JSON response with: {'bottlenecks': [{'component': 'CPU/Memory/Disk/SQL', 'severity': 'CRITICAL/WARNING/INFO', 'root_cause': 'analysis', 'recommendation': 'specific action', 'priority': 1-10}], 'correlation_analysis': 'cross-component analysis', 'summary': 'overall assessment'}"
         
         return prompt
+
+    def analyze_log_entries(self, log_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Analyze log entries using Azure OpenAI
+        
+        Args:
+            log_data: Log analysis results from LogAnalyzer
+            
+        Returns:
+            AI analysis of log entries or None if analysis fails
+        """
+        try:
+            self.logger.info("Sending log data to Azure OpenAI for analysis")
+            
+            # Create focused prompt for log analysis
+            prompt = self._create_log_analysis_prompt(log_data)
+            
+            response = self.client.chat.completions.create(
+                model=self.config.azure_openai_deployment,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": """You are a SQL Server performance expert analyzing log files. 
+                        Focus on identifying performance bottlenecks, security issues, and operational problems 
+                        from SQL Server error logs and Windows event logs. Provide actionable recommendations
+                        with priority levels and impact assessment."""
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1500,
+                temperature=0.3
+            )
+            
+            content = response.choices[0].message.content
+            self.logger.info("Received AI analysis for log data")
+            
+            # Try to parse as JSON, fallback to text analysis
+            try:
+                import json
+                return json.loads(content)
+            except:
+                # If JSON parsing fails, create structured response
+                return {
+                    'analysis': content,
+                    'recommendations': self._extract_recommendations_from_text(content or ''),
+                    'summary': 'AI analysis completed - see detailed analysis for findings'
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error in AI log analysis: {str(e)}")
+            return None
+
+    def _create_log_analysis_prompt(self, log_data: Dict[str, Any]) -> str:
+        """Create focused prompt for log analysis
+        
+        Args:
+            log_data: Log analysis results
+            
+        Returns:
+            Formatted prompt for AI analysis
+        """
+        prompt_parts = []
+        
+        # Analysis period and scope
+        if 'summary' in log_data:
+            summary = log_data['summary']
+            prompt_parts.append(f"Analysis Period: {summary.get('analysis_period_days', 7)} days")
+            prompt_parts.append(f"SQL Server Entries: {summary.get('total_sql_entries', 0):,}")
+            prompt_parts.append(f"Critical SQL Errors: {summary.get('critical_sql_errors', 0):,}")
+            prompt_parts.append(f"Windows Events: {summary.get('total_windows_events', 0):,}")
+        
+        # SQL Server error analysis
+        if 'sql_server_errors' in log_data:
+            sql_errors = log_data['sql_server_errors']
+            
+            # Critical errors
+            critical_errors = sql_errors.get('critical_errors', [])
+            if critical_errors:
+                prompt_parts.append(f"\nCritical SQL Server Errors ({len(critical_errors)} found):")
+                for error in critical_errors[:5]:  # Limit to first 5 for prompt space
+                    severity = error.get('severity', 0)
+                    error_num = error.get('error_number', 0)
+                    text = error.get('text', '')[:200]  # Truncate for prompt
+                    prompt_parts.append(f"- Severity {severity}, Error {error_num}: {text}")
+            
+            # Performance issues
+            performance_issues = sql_errors.get('performance_issues', {})
+            if performance_issues:
+                prompt_parts.append("\nPerformance Issues Detected:")
+                for issue_type, issues in performance_issues.items():
+                    if issues:
+                        prompt_parts.append(f"- {issue_type.replace('_', ' ').title()}: {len(issues)} occurrences")
+                        # Include sample of most recent issue
+                        latest = max(issues, key=lambda x: x.get('log_date', datetime.min))
+                        sample_text = latest.get('text', '')[:150]
+                        prompt_parts.append(f"  Sample: {sample_text}")
+            
+            # Severity breakdown
+            severity_breakdown = sql_errors.get('severity_breakdown', {})
+            if severity_breakdown:
+                prompt_parts.append("\nSeverity Breakdown:")
+                for severity, count in severity_breakdown.items():
+                    prompt_parts.append(f"- {severity}: {count} occurrences")
+        
+        # Windows event analysis
+        if 'windows_events' in log_data:
+            windows_events = log_data['windows_events']
+            categorized = windows_events.get('categorized_events', {})
+            
+            if categorized:
+                prompt_parts.append("\nWindows Event Log Issues:")
+                for category, events in categorized.items():
+                    if events:
+                        prompt_parts.append(f"- {category.replace('_', ' ').title()}: {len(events)} events")
+                        # Include sample event message
+                        sample_event = events[0]
+                        sample_message = sample_event.get('Message', '')[:100]
+                        prompt_parts.append(f"  Sample: {sample_message}")
+        
+        # Existing recommendations
+        if 'recommendations' in log_data:
+            recommendations = log_data['recommendations']
+            if recommendations:
+                prompt_parts.append(f"\nCurrent Recommendations ({len(recommendations)}):")
+                for rec in recommendations[:3]:  # First 3 recommendations
+                    prompt_parts.append(f"- {rec}")
+        
+        if not prompt_parts:
+            prompt_parts.append("No significant log issues detected in the analysis period")
+        
+        prompt = "SQL Server and Windows Log Analysis:\n" + "\n".join(prompt_parts)
+        prompt += "\n\nAnalyze these log findings and provide:\n"
+        prompt += "1. Root cause analysis of critical errors and performance issues\n"
+        prompt += "2. Risk assessment for each category of issues\n"
+        prompt += "3. Specific remediation steps with priority levels (1-10)\n"
+        prompt += "4. Preventive measures to avoid future occurrences\n"
+        prompt += "5. Correlation between SQL Server and Windows events\n\n"
+        prompt += "Provide JSON response with: {'critical_findings': [{'issue': 'description', 'severity': 'CRITICAL/HIGH/MEDIUM/LOW', 'root_cause': 'analysis', 'remediation': 'specific steps', 'priority': 1-10, 'prevention': 'preventive measures'}], 'correlation_analysis': 'relationship between different log entries', 'risk_assessment': 'overall risk evaluation', 'summary': 'executive summary'}"
+        
+        return prompt
+
+    def _extract_recommendations_from_text(self, text: str) -> List[str]:
+        """Extract recommendations from AI response text
+        
+        Args:
+            text: AI response text
+            
+        Returns:
+            List of extracted recommendations
+        """
+        recommendations = []
+        
+        # Look for numbered lists or bullet points
+        lines = text.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line:
+                # Check if line looks like a recommendation
+                if any(keyword in line.lower() for keyword in ['recommend', 'should', 'consider', 'implement', 'configure', 'monitor', 'check', 'review', 'upgrade']):
+                    # Clean up the line
+                    if line.startswith(('•', '-', '*', '1.', '2.', '3.', '4.', '5.')):
+                        line = line[2:].strip()
+                    elif line.startswith(tuple(f'{i}.' for i in range(1, 21))):
+                        line = line[line.find('.') + 1:].strip()
+                    
+                    if line and len(line) > 10:  # Only meaningful recommendations
+                        recommendations.append(line)
+        
+        # If no recommendations found, look for action items
+        if not recommendations:
+            for line in lines:
+                line = line.strip()
+                if line and ('action' in line.lower() or 'step' in line.lower()):
+                    recommendations.append(line)
+        
+        return recommendations[:10]  # Limit to 10 recommendations
