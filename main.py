@@ -55,6 +55,8 @@ Examples:
   python main.py -s SQLSERVER01
   python main.py -s SQLSERVER01 -n --output ./custom_reports
   python main.py -s SQLSERVER01 --schedule
+  python main.py -s SQLSERVER01 --perfmon-file "C:\\PerfLogs\\sql_perf.blg"
+  python main.py -s SQLSERVER01 --perfmon-duration 120 --ai-analysis
         """
     )
     
@@ -93,6 +95,18 @@ Examples:
         action="store_true",
         help="Run enhanced AI-powered analysis with advanced recommendations"
     )
+    
+    parser.add_argument(
+        "--perfmon-file",
+        help="Path to Performance Monitor log file (.blg) for additional analysis"
+    )
+    
+    parser.add_argument(
+        "--perfmon-duration",
+        type=int,
+        default=240,  # 4 hours
+        help="Duration in minutes for PerfMon data collection (default: 240 minutes)"
+    )
 
     args = parser.parse_args()    # Setup logging
     setup_logging(args.night_mode)
@@ -114,7 +128,7 @@ Examples:
         else:
             # Run single analysis
             logger.info(f"Starting SQL Server analysis for: {args.server}")
-            run_analysis(args.server, output_path, config, args.night_mode, args.ai_analysis)
+            run_analysis(args.server, output_path, config, args.night_mode, args.ai_analysis, args.perfmon_file, args.perfmon_duration)
             
     except KeyboardInterrupt:
         logger.info("Analysis interrupted by user")
@@ -125,7 +139,7 @@ Examples:
     
     return 0
 
-def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis=False):
+def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis=False, perfmon_file=None, perfmon_duration=240):
     """Run a single analysis"""
     logger = logging.getLogger(__name__)
     
@@ -135,6 +149,54 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
         import os
         os.environ['AI_ANALYSIS_ENABLED'] = 'true'
         logger.info("AI analysis enabled via command line flag")
+    
+    # Initialize PerfMon analysis if requested
+    perfmon_results = None
+    if perfmon_file:
+        logger.info(f"Analyzing Performance Monitor data from: {perfmon_file}")
+        from src.perfmon.performance_analyzer import PerformanceCounterAnalyzer
+        perfmon_analyzer = PerformanceCounterAnalyzer(config)
+        perfmon_results = perfmon_analyzer.analyze_performance_log(perfmon_file)
+        
+        if perfmon_results.get('error'):
+            logger.warning(f"PerfMon analysis failed: {perfmon_results['error']}")
+            perfmon_results = None
+        else:
+            logger.info("Performance Monitor analysis completed successfully")
+    elif perfmon_duration and perfmon_duration > 0:
+        # Start automatic PerfMon data collection if no file provided but duration specified
+        logger.info(f"Starting automatic Performance Monitor data collection for {perfmon_duration} minutes...")
+        try:
+            from src.perfmon.template_manager import PerfMonTemplateManager
+            from pathlib import Path
+            
+            template_manager = PerfMonTemplateManager(config)
+            template_file = Path(__file__).parent / "perfmon" / "templates" / "sql_performance_template.xml"
+            
+            if template_file.exists():
+                # Start data collection
+                collection_name = f"SQLSpeedinator_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                template_info = template_manager.parse_template(template_file)
+                if template_info:
+                    dcs_file = template_manager.create_data_collector_set(template_info, collection_name)
+                    if dcs_file:
+                        collection_result = template_manager.start_data_collection(dcs_file, duration_hours=max(1, perfmon_duration//60))
+                        collection_started = collection_result.get('success', False)
+                    else:
+                        collection_started = False
+                else:
+                    collection_started = False
+                
+                if collection_started:
+                    logger.info(f"Performance Monitor collection '{collection_name}' started successfully")
+                    logger.info(f"Collection will run for {perfmon_duration} minutes in the background")
+                    logger.info("Proceeding with SQL Server analysis while PerfMon data is being collected...")
+                else:
+                    logger.warning("Failed to start automatic Performance Monitor collection")
+            else:
+                logger.warning(f"PerfMon template not found: {template_file}")
+        except Exception as e:
+            logger.warning(f"Failed to start automatic PerfMon collection: {e}")
     
     # Create connection
     logger.info("Establishing SQL Server connection...")
@@ -150,6 +212,23 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
         # Run analysis
         logger.info("Starting performance analysis...")
         analysis_results = analyzer.run_full_analysis()
+        
+        # Add PerfMon results to analysis if available
+        if perfmon_results:
+            analysis_results['perfmon_analysis'] = perfmon_results
+            
+            # Run AI analysis on PerfMon data if AI is enabled
+            if ai_analysis:
+                logger.info("Running AI analysis on Performance Monitor data...")
+                from src.services.ai_service import AIService
+                ai_service = AIService(config)
+                perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
+                
+                if perfmon_ai_analysis:
+                    analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
+                    logger.info("AI Performance Monitor analysis completed")
+                else:
+                    logger.info("AI Performance Monitor analysis skipped or failed")
         
         # Generate report
         logger.info("Generating PDF report...")

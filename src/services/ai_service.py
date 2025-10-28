@@ -201,3 +201,143 @@ class AIService:
         prompt += "\n\nProvide JSON response with: {'bottlenecks': [{'issue': 'description', 'impact': 'HIGH/MEDIUM/LOW', 'recommendation': 'specific action'}], 'summary': 'overall assessment'}"
         
         return prompt
+    
+    def analyze_perfmon_bottlenecks(self, perfmon_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Analyze Performance Monitor data and provide AI-powered bottleneck insights
+        
+        Args:
+            perfmon_data: Performance Monitor analysis results
+            
+        Returns:
+            Dict containing AI analysis of Performance Monitor bottlenecks, or None if disabled/failed
+        """
+        if not self.is_enabled():
+            self.logger.info("AI Copilot not enabled or not configured")
+            return None
+        
+        try:
+            # Create PerfMon-specific analysis prompt
+            prompt = self._create_perfmon_analysis_prompt(perfmon_data)
+            
+            self.logger.info("Sending Performance Monitor data to Azure OpenAI for bottleneck analysis")
+            
+            response = self.client.chat.completions.create(
+                model=self.config.azure_openai_deployment,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert Windows Performance Monitor and SQL Server performance analyst. Analyze the provided performance counter data to identify system bottlenecks and their root causes. Focus on CPU, memory, disk I/O, and SQL Server specific metrics. Provide specific, actionable recommendations. Format your response as JSON."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=1500,
+                temperature=0.1
+            )
+            
+            # Parse the AI response
+            ai_content = response.choices[0].message.content.strip()
+            self.logger.info("Received AI analysis for Performance Monitor data")
+            
+            # Try to parse as JSON, fallback to text if needed
+            try:
+                ai_analysis = json.loads(ai_content)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, create structured response from text
+                ai_analysis = {
+                    "analysis_type": "perfmon_bottlenecks",
+                    "raw_response": ai_content,
+                    "summary": "AI analysis completed - see raw response for details",
+                    "bottlenecks": [],
+                    "recommendations": ai_content.split('\n') if '\n' in ai_content else [ai_content]
+                }
+            
+            ai_analysis["analysis_type"] = "perfmon_bottlenecks"
+            from datetime import datetime
+            ai_analysis["timestamp"] = datetime.now().isoformat()
+            
+            return ai_analysis
+            
+        except Exception as e:
+            self.logger.error(f"Error in AI Performance Monitor analysis: {str(e)}")
+            return None
+    
+    def _create_perfmon_analysis_prompt(self, perfmon_data: Dict[str, Any]) -> str:
+        """Create focused prompt for Performance Monitor analysis"""
+        prompt_parts = []
+        
+        # Collection summary
+        if 'summary' in perfmon_data:
+            summary = perfmon_data['summary']
+            prompt_parts.append(f"Collection: {summary.get('duration_minutes', 0):.1f} minutes, {summary.get('total_counters', 0)} counters")
+        
+        # CPU metrics
+        if 'cpu_analysis' in perfmon_data:
+            cpu = perfmon_data['cpu_analysis']
+            if 'metrics' in cpu:
+                metrics = cpu['metrics']
+                status = cpu.get('status', 'OK')
+                if 'avg_processor_time' in metrics:
+                    prompt_parts.append(f"CPU: {metrics['avg_processor_time']}% avg usage ({status})")
+                if 'avg_processor_queue' in metrics:
+                    prompt_parts.append(f"CPU Queue: {metrics['avg_processor_queue']} avg length")
+        
+        # Memory metrics
+        if 'memory_analysis' in perfmon_data:
+            memory = perfmon_data['memory_analysis']
+            if 'metrics' in memory:
+                metrics = memory['metrics']
+                status = memory.get('status', 'OK')
+                if 'avg_available_mb' in metrics:
+                    prompt_parts.append(f"Memory: {metrics['avg_available_mb']:,.0f} MB avg available ({status})")
+                if 'avg_page_life_expectancy' in metrics:
+                    prompt_parts.append(f"Page Life Expectancy: {metrics['avg_page_life_expectancy']:,.0f} seconds")
+        
+        # Disk metrics
+        if 'disk_analysis' in perfmon_data:
+            disk = perfmon_data['disk_analysis']
+            if 'metrics' in disk:
+                metrics = disk['metrics']
+                status = disk.get('status', 'OK')
+                if 'avg_disk_queue_length' in metrics:
+                    prompt_parts.append(f"Disk Queue: {metrics['avg_disk_queue_length']} avg length ({status})")
+                if 'avg_disk_read_ms' in metrics:
+                    prompt_parts.append(f"Disk Latency: {metrics['avg_disk_read_ms']} ms avg read")
+        
+        # SQL Server metrics
+        if 'sql_server_analysis' in perfmon_data:
+            sql = perfmon_data['sql_server_analysis']
+            if 'metrics' in sql:
+                metrics = sql['metrics']
+                status = sql.get('status', 'OK')
+                if 'avg_batch_requests_per_sec' in metrics:
+                    prompt_parts.append(f"SQL Batches/sec: {metrics['avg_batch_requests_per_sec']} ({status})")
+                if 'avg_compilations_per_sec' in metrics:
+                    prompt_parts.append(f"SQL Compilations/sec: {metrics['avg_compilations_per_sec']}")
+                if 'avg_lock_waits_per_sec' in metrics:
+                    prompt_parts.append(f"Lock Waits/sec: {metrics['avg_lock_waits_per_sec']}")
+        
+        # Existing bottlenecks
+        if 'bottlenecks' in perfmon_data and perfmon_data['bottlenecks']:
+            bottleneck_list = []
+            for bottleneck in perfmon_data['bottlenecks']:
+                severity = bottleneck.get('severity', 'UNKNOWN')
+                category = bottleneck.get('category', 'Unknown')
+                description = bottleneck.get('description', 'No description')
+                bottleneck_list.append(f"{severity} {category}: {description}")
+            prompt_parts.append(f"Detected Bottlenecks: {'; '.join(bottleneck_list)}")
+        
+        if not prompt_parts:
+            prompt_parts.append("No significant performance metrics available in Performance Monitor data")
+        
+        prompt = "Windows Performance Monitor Analysis:\n" + "\n".join(prompt_parts)
+        prompt += "\n\nAnalyze these Performance Monitor metrics and identify:\n"
+        prompt += "1. Root cause analysis of performance bottlenecks\n"
+        prompt += "2. Correlation between different metrics (CPU, Memory, Disk, SQL Server)\n"
+        prompt += "3. Specific recommendations for each bottleneck\n"
+        prompt += "4. Priority order for addressing issues\n\n"
+        prompt += "Provide JSON response with: {'bottlenecks': [{'component': 'CPU/Memory/Disk/SQL', 'severity': 'CRITICAL/WARNING/INFO', 'root_cause': 'analysis', 'recommendation': 'specific action', 'priority': 1-10}], 'correlation_analysis': 'cross-component analysis', 'summary': 'overall assessment'}"
+        
+        return prompt

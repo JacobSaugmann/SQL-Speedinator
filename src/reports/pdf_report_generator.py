@@ -408,6 +408,10 @@ class PDFReportGenerator:
             if 'ai_analysis' in analysis_results:
                 story.extend(self._create_ai_analysis_section(analysis_results['ai_analysis']))
             
+            # Performance Monitor Analysis Section
+            if 'perfmon_analysis' in analysis_results:
+                story.extend(self._create_perfmon_analysis_section(analysis_results['perfmon_analysis']))
+            
             # Build PDF
             doc.build(story)
             
@@ -1175,5 +1179,281 @@ class PDFReportGenerator:
             table = Table(backup_table_data, colWidths=self._get_responsive_column_widths(4))
             table.setStyle(self._get_modern_table_style())
             story.append(table)
+        
+        return story
+    
+    def _create_perfmon_analysis_section(self, perfmon_data: Dict[str, Any]) -> List:
+        """Create Performance Monitor analysis section"""
+        story = []
+        
+        # Section Header
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph("📊 Performance Monitor Analysis", self.styles['CustomSectionHeader']))
+        story.append(Spacer(1, 0.05*inch))
+        
+        if 'error' in perfmon_data:
+            story.append(Paragraph(f"❌ Error analyzing Performance Monitor data: {perfmon_data['error']}", 
+                                 self.styles['CustomBodyRed']))
+            return story
+        
+        # Summary Information
+        if 'summary' in perfmon_data:
+            summary = perfmon_data['summary']
+            story.append(Paragraph("📈 Collection Summary", self.styles['CustomSubheader']))
+            
+            summary_data = [
+                ['Collection Period', f"{summary.get('duration_minutes', 0):.1f} minutes"],
+                ['Total Counters', str(summary.get('total_counters', 0))],
+                ['Total Samples', f"{summary.get('total_samples', 0):,}"]
+            ]
+            
+            table = Table(summary_data, colWidths=self._get_responsive_column_widths(2))
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+            story.append(Spacer(1, 0.05*inch))
+        
+        # Bottlenecks Analysis
+        if 'bottlenecks' in perfmon_data and perfmon_data['bottlenecks']:
+            story.append(Paragraph("🚨 Performance Bottlenecks", self.styles['CustomSubheader']))
+            
+            bottleneck_data = [['Category', 'Severity', 'Description']]
+            
+            for bottleneck in perfmon_data['bottlenecks']:
+                severity = bottleneck.get('severity', 'UNKNOWN')
+                if severity == 'CRITICAL':
+                    severity_text = '<font color="red">🔴 CRITICAL</font>'
+                elif severity == 'WARNING':
+                    severity_text = '<font color="orange">🟠 WARNING</font>'
+                else:
+                    severity_text = f'<font color="green">🟢 {severity}</font>'
+                
+                bottleneck_data.append([
+                    bottleneck.get('category', 'Unknown'),
+                    severity_text,
+                    bottleneck.get('description', 'No description')
+                ])
+            
+            table = Table(bottleneck_data, colWidths=self._get_responsive_column_widths(3))
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+            story.append(Spacer(1, 0.05*inch))
+        
+        # CPU Analysis
+        if 'cpu_analysis' in perfmon_data:
+            cpu = perfmon_data['cpu_analysis']
+            story.append(Paragraph("🖥️ CPU Performance", self.styles['CustomSubheader']))
+            
+            cpu_data = [['Metric', 'Value', 'Status']]
+            
+            if 'metrics' in cpu:
+                metrics = cpu['metrics']
+                status = cpu.get('status', 'OK')
+                status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
+                
+                if 'avg_processor_time' in metrics:
+                    cpu_data.append([
+                        'Average CPU Usage',
+                        f"{metrics['avg_processor_time']}%",
+                        f'<font color="{status_color}">{status}</font>'
+                    ])
+                
+                if 'max_processor_time' in metrics:
+                    cpu_data.append([
+                        'Peak CPU Usage',
+                        f"{metrics['max_processor_time']}%",
+                        ''
+                    ])
+                
+                if 'avg_processor_queue' in metrics:
+                    cpu_data.append([
+                        'Average Queue Length',
+                        str(metrics['avg_processor_queue']),
+                        ''
+                    ])
+            
+            if len(cpu_data) > 1:
+                table = Table(cpu_data, colWidths=self._get_responsive_column_widths(3))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+                story.append(Spacer(1, 0.05*inch))
+        
+        # Memory Analysis
+        if 'memory_analysis' in perfmon_data:
+            memory = perfmon_data['memory_analysis']
+            story.append(Paragraph("🧠 Memory Performance", self.styles['CustomSubheader']))
+            
+            memory_data = [['Metric', 'Value', 'Status']]
+            
+            if 'metrics' in memory:
+                metrics = memory['metrics']
+                status = memory.get('status', 'OK')
+                status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
+                
+                if 'avg_available_mb' in metrics:
+                    memory_data.append([
+                        'Average Available Memory',
+                        f"{metrics['avg_available_mb']:,.0f} MB",
+                        f'<font color="{status_color}">{status}</font>'
+                    ])
+                
+                if 'min_available_mb' in metrics:
+                    memory_data.append([
+                        'Minimum Available Memory',
+                        f"{metrics['min_available_mb']:,.0f} MB",
+                        ''
+                    ])
+                
+                if 'avg_page_life_expectancy' in metrics:
+                    memory_data.append([
+                        'Average Page Life Expectancy',
+                        f"{metrics['avg_page_life_expectancy']:,.0f} seconds",
+                        ''
+                    ])
+            
+            if len(memory_data) > 1:
+                table = Table(memory_data, colWidths=self._get_responsive_column_widths(3))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+                story.append(Spacer(1, 0.05*inch))
+        
+        # Disk Analysis
+        if 'disk_analysis' in perfmon_data:
+            disk = perfmon_data['disk_analysis']
+            story.append(Paragraph("💾 Disk Performance", self.styles['CustomSubheader']))
+            
+            disk_data = [['Metric', 'Value', 'Status']]
+            
+            if 'metrics' in disk:
+                metrics = disk['metrics']
+                status = disk.get('status', 'OK')
+                status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
+                
+                if 'avg_disk_queue_length' in metrics:
+                    disk_data.append([
+                        'Average Disk Queue Length',
+                        str(metrics['avg_disk_queue_length']),
+                        f'<font color="{status_color}">{status}</font>'
+                    ])
+                
+                if 'avg_disk_read_ms' in metrics:
+                    disk_data.append([
+                        'Average Read Latency',
+                        f"{metrics['avg_disk_read_ms']} ms",
+                        ''
+                    ])
+                
+                if 'max_disk_queue_length' in metrics:
+                    disk_data.append([
+                        'Peak Queue Length',
+                        str(metrics['max_disk_queue_length']),
+                        ''
+                    ])
+            
+            if len(disk_data) > 1:
+                table = Table(disk_data, colWidths=self._get_responsive_column_widths(3))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+                story.append(Spacer(1, 0.05*inch))
+        
+        # SQL Server Analysis
+        if 'sql_server_analysis' in perfmon_data:
+            sql = perfmon_data['sql_server_analysis']
+            story.append(Paragraph("🗃️ SQL Server Performance", self.styles['CustomSubheader']))
+            
+            sql_data = [['Metric', 'Value', 'Status']]
+            
+            if 'metrics' in sql:
+                metrics = sql['metrics']
+                status = sql.get('status', 'OK')
+                status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
+                
+                if 'avg_batch_requests_per_sec' in metrics:
+                    sql_data.append([
+                        'Average Batch Requests/sec',
+                        str(metrics['avg_batch_requests_per_sec']),
+                        f'<font color="{status_color}">{status}</font>'
+                    ])
+                
+                if 'avg_compilations_per_sec' in metrics:
+                    sql_data.append([
+                        'Average Compilations/sec',
+                        str(metrics['avg_compilations_per_sec']),
+                        ''
+                    ])
+                
+                if 'avg_lock_waits_per_sec' in metrics:
+                    sql_data.append([
+                        'Average Lock Waits/sec',
+                        str(metrics['avg_lock_waits_per_sec']),
+                        ''
+                    ])
+            
+            if len(sql_data) > 1:
+                table = Table(sql_data, colWidths=self._get_responsive_column_widths(3))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+                story.append(Spacer(1, 0.05*inch))
+        
+        # Recommendations
+        if 'recommendations' in perfmon_data and perfmon_data['recommendations']:
+            story.append(Paragraph("💡 Performance Recommendations", self.styles['CustomSubheader']))
+            
+            for i, recommendation in enumerate(perfmon_data['recommendations'][:10], 1):  # Limit to 10
+                story.append(Paragraph(f"{i}. {recommendation}", self.styles['CustomBody']))
+            
+            story.append(Spacer(1, 0.05*inch))
+        
+        # AI Analysis Section for PerfMon
+        if 'ai_analysis' in perfmon_data:
+            story.append(Paragraph("🤖 AI Performance Analysis", self.styles['CustomSubheader']))
+            ai_data = perfmon_data['ai_analysis']
+            
+            if 'summary' in ai_data:
+                story.append(Paragraph(f"📋 {ai_data['summary']}", self.styles['CustomBody']))
+                story.append(Spacer(1, 0.03*inch))
+            
+            # AI Bottlenecks
+            if 'bottlenecks' in ai_data and ai_data['bottlenecks']:
+                story.append(Paragraph("🎯 AI-Identified Bottlenecks", self.styles['CustomBodySmall']))
+                
+                ai_bottleneck_data = [['Component', 'Severity', 'Root Cause', 'Recommendation']]
+                
+                for bottleneck in ai_data['bottlenecks'][:5]:  # Limit to top 5
+                    component = bottleneck.get('component', 'Unknown')
+                    severity = bottleneck.get('severity', 'UNKNOWN')
+                    root_cause = bottleneck.get('root_cause', 'Not specified')
+                    recommendation = bottleneck.get('recommendation', 'No recommendation')
+                    
+                    # Truncate long text for table
+                    if len(root_cause) > 100:
+                        root_cause = root_cause[:97] + "..."
+                    if len(recommendation) > 100:
+                        recommendation = recommendation[:97] + "..."
+                    
+                    # Color code severity
+                    if severity == 'CRITICAL':
+                        severity_text = '<font color="red">🔴 CRITICAL</font>'
+                    elif severity == 'WARNING':
+                        severity_text = '<font color="orange">🟠 WARNING</font>'
+                    else:
+                        severity_text = f'<font color="green">🟢 {severity}</font>'
+                    
+                    ai_bottleneck_data.append([
+                        component,
+                        severity_text,
+                        root_cause,
+                        recommendation
+                    ])
+                
+                table = Table(ai_bottleneck_data, colWidths=self._get_responsive_column_widths(4))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+                story.append(Spacer(1, 0.05*inch))
+            
+            # Correlation Analysis
+            if 'correlation_analysis' in ai_data:
+                story.append(Paragraph("🔗 Cross-Component Analysis", self.styles['CustomBodySmall']))
+                story.append(Paragraph(ai_data['correlation_analysis'], self.styles['CustomBody']))
+                story.append(Spacer(1, 0.05*inch))
         
         return story
