@@ -792,13 +792,17 @@ class PDFReportGenerator:
                     usage_color = 'red' if usage_category in ['VERY_HIGH_USAGE', 'HIGH_USAGE'] else 'orange' if usage_category == 'MODERATE_USAGE' else 'gray'
                     action_color = 'red' if action == 'REBUILD' else 'orange' if action == 'REORGANIZE' else 'green'
                     
+                    # Get emoji for usage and action
+                    usage_emoji = '🔴' if usage_color == 'red' else ('🟠' if usage_color == 'orange' else ('🟡' if usage_color == 'yellow' else '🟢'))
+                    action_emoji = '🔴' if action_color == 'red' else ('🟠' if action_color == 'orange' else ('🟡' if action_color == 'yellow' else '🔵'))
+                    
                     table_data.append([
                         self._create_table_paragraph(full_name[:30] + '...' if len(full_name) > 30 else full_name),
                         self._create_table_paragraph(index_name[:20] + '...' if len(index_name) > 20 else index_name),
                         self._create_table_paragraph(f"{fragmentation:.1f}%"),
                         self._create_table_paragraph(f"{size_mb:.1f}"),
-                        self._create_table_paragraph(f'<font color="{usage_color}">{usage_category.replace("_", " ")}</font>'),
-                        self._create_table_paragraph(f'<font color="{action_color}">{action}</font>')
+                        self._create_table_paragraph(f'{usage_emoji} {usage_category.replace("_", " ")}'),
+                        self._create_table_paragraph(f'{action_emoji} {action}')
                     ])
                 
                 frag_usage_table = Table(table_data, colWidths=self._get_responsive_column_widths(6))
@@ -901,7 +905,7 @@ class PDFReportGenerator:
                     table_data.append([
                         self._create_table_paragraph(name[:30]),  # Truncate long names
                         self._create_table_paragraph(current_val),
-                        self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
+                        self._create_table_paragraph(f'{"🔴" if status_color == "red" else ("🟠" if status_color == "orange" else ("🟡" if status_color == "yellow" else "🟢"))} {status}')
                     ])
                 
                 config_table = Table(table_data, colWidths=self._get_responsive_column_widths(3))
@@ -1116,7 +1120,7 @@ class PDFReportGenerator:
                 config_table_data.append([
                     self._create_table_paragraph(name),
                     self._create_table_paragraph(value),
-                    self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
+                    self._create_table_paragraph(f'{"🔴" if status_color == "red" else ("🟠" if status_color == "orange" else "🟢")} {status}')
                 ])
             
             table = Table(config_table_data, colWidths=self._get_responsive_column_widths(3))
@@ -1152,7 +1156,7 @@ class PDFReportGenerator:
                     self._create_table_paragraph(recovery),
                     self._create_table_paragraph(compat),
                     self._create_table_paragraph(state),
-                    self._create_table_paragraph(f'<font color="{issues_color}">{issues}</font>')
+                    self._create_table_paragraph(f'{"🔴" if issues_color == "red" else ("🟠" if issues_color == "orange" else "🟢")} {issues}')
                 ])
             
             table = Table(db_table_data, colWidths=self._get_responsive_column_widths(5))
@@ -1186,7 +1190,7 @@ class PDFReportGenerator:
                     self._create_table_paragraph(file_type),
                     self._create_table_paragraph(size_mb),
                     self._create_table_paragraph(growth),
-                    self._create_table_paragraph(f'<font color="{issues_color}">{issues}</font>')
+                    self._create_table_paragraph(f'{"🔴" if issues_color == "red" else ("🟠" if issues_color == "orange" else "🟢")} {issues}')
                 ])
             
             table = Table(files_table_data, colWidths=self._get_responsive_column_widths(5))
@@ -1233,7 +1237,7 @@ class PDFReportGenerator:
                     self._create_table_paragraph(db_name),
                     self._create_table_paragraph(str(last_full)),
                     self._create_table_paragraph(str(last_log)),
-                    self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
+                    self._create_table_paragraph(f'{"🔴" if status_color == "red" else ("🟠" if status_color == "orange" else "🟢")} {status}')
                 ])
             
             table = Table(backup_table_data, colWidths=self._get_responsive_column_widths(4))
@@ -1281,11 +1285,11 @@ class PDFReportGenerator:
             for bottleneck in perfmon_data['bottlenecks']:
                 severity = bottleneck.get('severity', 'UNKNOWN')
                 if severity == 'CRITICAL':
-                    severity_text = '<font color="red">🔴 CRITICAL</font>'
+                    severity_text = '🔴 CRITICAL'
                 elif severity == 'WARNING':
-                    severity_text = '<font color="orange">🟠 WARNING</font>'
+                    severity_text = '🟠 WARNING'
                 else:
-                    severity_text = f'<font color="green">🟢 {severity}</font>'
+                    severity_text = f'🟢 {severity}'
                 
                 bottleneck_data.append([
                     bottleneck.get('category', 'Unknown'),
@@ -1311,10 +1315,11 @@ class PDFReportGenerator:
                 status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
                 
                 if 'avg_processor_time' in metrics:
+                    status_emoji = '🔴' if status == 'CRITICAL' else ('🟠' if status == 'WARNING' else '🟢')
                     cpu_data.append([
                         'Average CPU Usage',
                         f"{metrics['avg_processor_time']}%",
-                        f'<font color="{status_color}">{status}</font>'
+                        f'{status_emoji} {status}'
                     ])
                 
                 if 'max_processor_time' in metrics:
@@ -1350,10 +1355,11 @@ class PDFReportGenerator:
                 status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
                 
                 if 'avg_available_mb' in metrics:
+                    status_emoji = '🔴' if status == 'CRITICAL' else ('🟠' if status == 'WARNING' else '🟢')
                     memory_data.append([
                         'Average Available Memory',
                         f"{metrics['avg_available_mb']:,.0f} MB",
-                        f'<font color="{status_color}">{status}</font>'
+                        f'{status_emoji} {status}'
                     ])
                 
                 if 'min_available_mb' in metrics:
@@ -1389,10 +1395,11 @@ class PDFReportGenerator:
                 status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
                 
                 if 'avg_disk_queue_length' in metrics:
+                    status_emoji = '🔴' if status == 'CRITICAL' else ('🟠' if status == 'WARNING' else '🟢')
                     disk_data.append([
                         'Average Disk Queue Length',
                         str(metrics['avg_disk_queue_length']),
-                        f'<font color="{status_color}">{status}</font>'
+                        f'{status_emoji} {status}'
                     ])
                 
                 if 'avg_disk_read_ms' in metrics:
@@ -1428,10 +1435,11 @@ class PDFReportGenerator:
                 status_color = 'red' if status == 'CRITICAL' else ('orange' if status == 'WARNING' else 'green')
                 
                 if 'avg_batch_requests_per_sec' in metrics:
+                    status_emoji = '🔴' if status == 'CRITICAL' else ('🟠' if status == 'WARNING' else '🟢')
                     sql_data.append([
                         'Average Batch Requests/sec',
                         str(metrics['avg_batch_requests_per_sec']),
-                        f'<font color="{status_color}">{status}</font>'
+                        f'{status_emoji} {status}'
                     ])
                 
                 if 'avg_compilations_per_sec' in metrics:

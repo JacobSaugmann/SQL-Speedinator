@@ -85,11 +85,11 @@ class AIService:
         if not isinstance(text, str):
             return text
             
-        # Fix malformed tags like '>green>', '>red>', '>orange>'
-        text = re.sub(r'>green>', '<font color="green">OK</font>', text)
-        text = re.sub(r'>red>', '<font color="red">CRITICAL</font>', text) 
-        text = re.sub(r'>orange>', '<font color="orange">WARNING</font>', text)
-        text = re.sub(r'>yellow>', '<font color="orange">CAUTION</font>', text)
+        # Fix malformed tags like '>green>', '>red>', '>orange>' - convert to plain text with emojis
+        text = re.sub(r'>green>', '🟢 OK', text)
+        text = re.sub(r'>red>', '🔴 CRITICAL', text) 
+        text = re.sub(r'>orange>', '🟠 WARNING', text)
+        text = re.sub(r'>yellow>', '🟡 CAUTION', text)
         
         # Remove any other malformed > tags
         text = re.sub(r'>(\w+)>', r'\1', text)

@@ -259,18 +259,31 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
                             wait_seconds = perfmon_duration * 60
                             start_time = time.time()
                             
-                            # Show progress while waiting
+                            # Show progress bar while waiting
+                            import sys
+                            print(f"\n🔄 Collecting Performance Monitor data for {perfmon_duration} minutes...")
+                            
                             while time.time() - start_time < wait_seconds:
                                 elapsed = int(time.time() - start_time)
                                 remaining = int(wait_seconds - elapsed)
+                                progress_percent = (elapsed / wait_seconds) * 100
                                 
-                                if elapsed % 30 == 0:  # Update every 30 seconds
-                                    minutes_remaining = remaining // 60
-                                    seconds_remaining = remaining % 60
-                                    logger.info(f"Data collection in progress... {minutes_remaining}m {seconds_remaining}s remaining")
+                                # Create progress bar
+                                bar_width = 50
+                                filled_length = int(bar_width * elapsed // wait_seconds)
+                                bar = '█' * filled_length + '░' * (bar_width - filled_length)
                                 
-                                time.sleep(5)  # Check every 5 seconds
+                                # Format time remaining
+                                minutes_remaining = remaining // 60
+                                seconds_remaining = remaining % 60
+                                
+                                # Clear line and show progress
+                                sys.stdout.write(f'\r[{bar}] {progress_percent:5.1f}% - {minutes_remaining:02d}m {seconds_remaining:02d}s remaining')
+                                sys.stdout.flush()
+                                
+                                time.sleep(1)  # Update every second for smooth progress
                             
+                            print(f"\n✅ Data collection completed!")
                             logger.info("Stopping data collection...")
                             
                             # Stop collection - pass the full collection result
