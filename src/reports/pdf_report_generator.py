@@ -163,12 +163,12 @@ class PDFReportGenerator:
             spaceBefore=3   # Very minimal space
         ))
 
-    def _get_responsive_column_widths(self, num_columns: int, page_width: float = 6.0) -> list:
+    def _get_responsive_column_widths(self, num_columns: int, page_width: float = 6.5) -> list:
         """Calculate responsive column widths that fit exactly within page margins"""
         if num_columns <= 0:
             return []
         
-        # Total available width (6 inches to ensure it fits)
+        # Total available width (6.5 inches to use full page width)
         total_width = page_width
         
         # Calculate equal column widths that sum to exact page width
@@ -178,7 +178,7 @@ class PDFReportGenerator:
 
     def _get_optimized_column_widths(self, num_columns: int, priority_weights = None) -> list:
         """Get optimized column widths for specific table types with exact page fit"""
-        total_width = 6.0  # inches - fits within margins
+        total_width = 6.5  # inches - use full page width within margins
         
         if priority_weights and len(priority_weights) == num_columns:
             # Custom weights for different columns
@@ -188,6 +188,50 @@ class PDFReportGenerator:
         # Default: equal width distribution
         col_width = total_width / num_columns
         return [col_width*inch] * num_columns
+
+    def _create_table_paragraph(self, text: str, font_size: int = 8, max_width: int = 150) -> Paragraph:
+        """Create a paragraph object for table cells with proper text wrapping"""
+        if text is None:
+            text = ""
+        
+        # Create paragraph style for table cells
+        cell_style = ParagraphStyle(
+            name='TableCell',
+            fontName='Helvetica',
+            fontSize=font_size,
+            leading=font_size + 2,  # Line height
+            leftIndent=0,
+            rightIndent=0,
+            spaceAfter=0,
+            spaceBefore=0,
+            alignment=0,  # Left alignment
+            wordWrap='CJK'  # Enable word wrapping
+        )
+        
+        # Convert text to string and handle long text
+        text_str = str(text)
+        if max_width and len(text_str) > max_width:
+            text_str = self._wrap_text(text_str, max_width)
+        
+        return Paragraph(text_str, cell_style)
+
+    def _create_table_header(self, headers: List[str], font_size: int = 9) -> List[Paragraph]:
+        """Create table header row with Paragraph objects for proper formatting"""
+        return [self._create_table_header_cell(header, font_size) for header in headers]
+    
+    def _create_table_header_cell(self, text: str, font_size: int = 9) -> Paragraph:
+        """Create a paragraph object for table headers with proper formatting"""
+        header_style = ParagraphStyle(
+            name='TableHeader',
+            fontName='Helvetica-Bold',
+            fontSize=font_size,
+            leading=font_size + 2,
+            leftIndent=0,
+            alignment=0,  # Left alignment
+            textColor=colors.white
+        )
+        
+        return Paragraph(str(text), header_style)
 
     def _wrap_text(self, text: str, max_length: int) -> str:
         """Enhanced text wrapping for better table readability with improved line breaks"""
@@ -234,7 +278,7 @@ class PDFReportGenerator:
         story.append(Spacer(1, height*inch))
 
     def _get_modern_table_style(self, header_color=None, data_color=None, grid_color=None):
-        """Get compact Schultz-styled table formatting"""
+        """Get compact Schultz-styled table formatting with enhanced text wrapping"""
         if header_color is None:
             header_color = self.schultz_colors['purple']
         if data_color is None:
@@ -249,35 +293,38 @@ class PDFReportGenerator:
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE', (0, 0), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),  # Minimal padding
-            ('TOPPADDING', (0, 0), (-1, 0), 3),     # Minimal padding
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),   # Minimal padding
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),  # Minimal padding
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),  # More padding for headers
+            ('TOPPADDING', (0, 0), (-1, 0), 6),     # More padding for headers
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),   # Consistent padding
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),  # Consistent padding
             
             # Data rows styling with enhanced multi-line text support
             ('BACKGROUND', (0, 1), (-1, -1), data_color),
             ('TEXTCOLOR', (0, 1), (-1, -1), self.schultz_colors['dark_gray']),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),  # More space for multi-line
-            ('TOPPADDING', (0, 1), (-1, -1), 8),     # More space for multi-line
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 12), # More space for multi-line text
+            ('TOPPADDING', (0, 1), (-1, -1), 8),     # More space for multi-line text
             ('LEFTPADDING', (0, 1), (-1, -1), 6),    
             ('RIGHTPADDING', (0, 1), (-1, -1), 6),   
             
             # Enhanced cell formatting for text wrapping
-            ('LEADING', (0, 1), (-1, -1), 10),       # Line height for multi-line text
-            ('WORDWRAP', (0, 1), (-1, -1), 'CJK'),   # Enable automatic word wrapping
+            ('LEADING', (0, 1), (-1, -1), 12),       # Better line spacing for readability
+            ('WORDWRAP', (0, 0), (-1, -1), 'CJK'),   # Enable word wrapping for all cells
             
             # Soft modern borders instead of hard grid
             ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e8e8e8')),
             ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#f0f0f0')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),     # Align content to top of cells
             
             # Modern card-like appearance
             ('BACKGROUND', (0, 0), (-1, 0), header_color),
             
             # Alternating row colors for better readability
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fafafa')])
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fafafa')]),
+            
+            # Auto row height to accommodate content
+            ('MINHEIGHT', (0, 0), (-1, -1), 24),     # Minimum row height
         ])
 
     def generate_report(self, analysis_results: Dict[str, Any], 
@@ -714,7 +761,7 @@ class PDFReportGenerator:
             
             if problem_configs:
                 story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
-                table_data = [['Setting', 'Current Value', 'Status']]
+                table_data = [self._create_table_header(['Setting', 'Current Value', 'Status'])]
                 
                 for cfg in problem_configs:
                     name = cfg.get('name', 'Unknown')
@@ -723,16 +770,16 @@ class PDFReportGenerator:
                     
                     # Color code the status
                     if status.startswith('WARNING'):
-                        status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                        status_color = 'orange'
                     elif status.startswith('CRITICAL'):
-                        status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                        status_color = 'red'
                     else:
-                        status_text = Paragraph(f"<font color='gray'>{status}</font>", self.styles['Normal'])
+                        status_color = 'gray'
                     
                     table_data.append([
-                        name[:30],  # Truncate long names
-                        current_val,
-                        status_text
+                        self._create_table_paragraph(name[:30]),  # Truncate long names
+                        self._create_table_paragraph(current_val),
+                        self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
                     ])
                 
                 config_table = Table(table_data, colWidths=self._get_responsive_column_widths(3))
@@ -781,7 +828,8 @@ class PDFReportGenerator:
             story.append(Paragraph("🎯 AI-Identified Performance Bottlenecks", self.styles['SubHeader']))
             
             # Create bottlenecks table using string data with enhanced text wrapping
-            table_data = [['Priority', 'Bottleneck Issue', 'Impact', 'AI Recommendation']]
+            # Create header row
+            table_data = [self._create_table_header(['Priority', 'Bottleneck Issue', 'Impact', 'AI Recommendation'])]
             
             for i, bottleneck in enumerate(bottlenecks[:5], 1):  # Top 5 bottlenecks
                 issue = bottleneck.get('issue', 'Unknown issue')
@@ -796,16 +844,16 @@ class PDFReportGenerator:
                 else:
                     priority_text = f"#{i} (LOW)"
                 
-                # Use string data - ReportLab will handle wrapping with WORDWRAP style
+                # Use Paragraph objects for proper text wrapping
                 table_data.append([
-                    priority_text,
-                    str(issue),
-                    impact,
-                    str(recommendation)
+                    self._create_table_paragraph(priority_text),
+                    self._create_table_paragraph(str(issue)),
+                    self._create_table_paragraph(impact),
+                    self._create_table_paragraph(str(recommendation))
                 ])
             
-            # Table with optimized column weights for proper text display
-            bottleneck_table = Table(table_data, colWidths=self._get_optimized_column_widths(4, [0.8, 2.5, 0.6, 2.1]))
+            # Table with responsive column widths for full page coverage
+            bottleneck_table = Table(table_data, colWidths=self._get_responsive_column_widths(4))
             bottleneck_table.setStyle(self._get_modern_table_style(
                 header_color=self.schultz_colors['purple']
             ))
@@ -928,7 +976,7 @@ class PDFReportGenerator:
         
         config_data = server_db_info.get('server_configuration', [])
         if config_data:
-            config_table_data = [['Setting', 'Current Value', 'Status']]
+            config_table_data = [self._create_table_header(['Setting', 'Current Value', 'Status'])]
             
             for config in config_data:
                 name = config.get('name', '')
@@ -937,15 +985,19 @@ class PDFReportGenerator:
                 
                 # Color code the status
                 if status.startswith('WARNING'):
-                    status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                    status_color = 'orange'
                 elif status.startswith('CRITICAL'):
-                    status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                    status_color = 'red'
                 else:
-                    status_text = Paragraph(f"<font color='green'>{status}</font>", self.styles['Normal'])
+                    status_color = 'green'
                 
-                config_table_data.append([name, value, status_text])
+                config_table_data.append([
+                    self._create_table_paragraph(name),
+                    self._create_table_paragraph(value),
+                    self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
+                ])
             
-            table = Table(config_table_data, colWidths=[2.5*inch, 1.5*inch, 2.5*inch])
+            table = Table(config_table_data, colWidths=self._get_responsive_column_widths(3))
             table.setStyle(self._get_modern_table_style())
             story.append(table)
         
@@ -956,7 +1008,7 @@ class PDFReportGenerator:
         
         databases = server_db_info.get('database_overview', [])
         if databases:
-            db_table_data = [['Database', 'Recovery Model', 'Compatibility', 'State', 'Issues']]
+            db_table_data = [self._create_table_header(['Database', 'Recovery Model', 'Compatibility', 'State', 'Issues'])]
             
             for db in databases:
                 name = db.get('database_name', '')
@@ -967,15 +1019,21 @@ class PDFReportGenerator:
                 
                 # Color code issues
                 if issues.startswith('WARNING'):
-                    issues_text = Paragraph(f"<font color='orange'>{issues}</font>", self.styles['Normal'])
+                    issues_color = 'orange'
                 elif issues.startswith('CRITICAL'):
-                    issues_text = Paragraph(f"<font color='red'>{issues}</font>", self.styles['Normal'])
+                    issues_color = 'red'
                 else:
-                    issues_text = Paragraph(f"<font color='green'>{issues}</font>", self.styles['Normal'])
+                    issues_color = 'green'
                 
-                db_table_data.append([name, recovery, compat, state, issues_text])
+                db_table_data.append([
+                    self._create_table_paragraph(name),
+                    self._create_table_paragraph(recovery),
+                    self._create_table_paragraph(compat),
+                    self._create_table_paragraph(state),
+                    self._create_table_paragraph(f'<font color="{issues_color}">{issues}</font>')
+                ])
             
-            table = Table(db_table_data, colWidths=[1.5*inch, 1*inch, 0.8*inch, 1*inch, 2.2*inch])
+            table = Table(db_table_data, colWidths=self._get_responsive_column_widths(5))
             table.setStyle(self._get_modern_table_style())
             story.append(table)
         
@@ -986,7 +1044,7 @@ class PDFReportGenerator:
         
         db_files = server_db_info.get('database_files', [])
         if db_files:
-            files_table_data = [['Database', 'File Type', 'Size (MB)', 'Growth', 'Issues']]
+            files_table_data = [self._create_table_header(['Database', 'File Type', 'Size (MB)', 'Growth', 'Issues'])]
             
             for file_info in db_files:
                 db_name = file_info.get('database_name', '')
@@ -997,13 +1055,19 @@ class PDFReportGenerator:
                 
                 # Color code issues
                 if issues.startswith('WARNING'):
-                    issues_text = Paragraph(f"<font color='orange'>{issues}</font>", self.styles['Normal'])
+                    issues_color = 'orange'
                 else:
-                    issues_text = Paragraph(f"<font color='green'>{issues}</font>", self.styles['Normal'])
+                    issues_color = 'green'
                 
-                files_table_data.append([db_name, file_type, size_mb, growth, issues_text])
+                files_table_data.append([
+                    self._create_table_paragraph(db_name),
+                    self._create_table_paragraph(file_type),
+                    self._create_table_paragraph(size_mb),
+                    self._create_table_paragraph(growth),
+                    self._create_table_paragraph(f'<font color="{issues_color}">{issues}</font>')
+                ])
             
-            table = Table(files_table_data, colWidths=[1.5*inch, 1*inch, 1*inch, 1.5*inch, 1.5*inch])
+            table = Table(files_table_data, colWidths=self._get_responsive_column_widths(5))
             table.setStyle(self._get_modern_table_style())
             story.append(table)
         
@@ -1014,7 +1078,7 @@ class PDFReportGenerator:
         
         backup_info = server_db_info.get('backup_info', [])
         if backup_info:
-            backup_table_data = [['Database', 'Last Full Backup', 'Last Log Backup', 'Status']]
+            backup_table_data = [self._create_table_header(['Database', 'Last Full Backup', 'Last Log Backup', 'Status'])]
             
             for backup in backup_info:
                 db_name = backup.get('database_name', '')
@@ -1037,15 +1101,20 @@ class PDFReportGenerator:
                 
                 # Color code status
                 if status.startswith('CRITICAL'):
-                    status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                    status_color = 'red'
                 elif status.startswith('WARNING'):
-                    status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                    status_color = 'orange'
                 else:
-                    status_text = Paragraph(f"<font color='green'>{status}</font>", self.styles['Normal'])
+                    status_color = 'green'
                 
-                backup_table_data.append([db_name, str(last_full), str(last_log), status_text])
+                backup_table_data.append([
+                    self._create_table_paragraph(db_name),
+                    self._create_table_paragraph(str(last_full)),
+                    self._create_table_paragraph(str(last_log)),
+                    self._create_table_paragraph(f'<font color="{status_color}">{status}</font>')
+                ])
             
-            table = Table(backup_table_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 2*inch])
+            table = Table(backup_table_data, colWidths=self._get_responsive_column_widths(4))
             table.setStyle(self._get_modern_table_style())
             story.append(table)
         
