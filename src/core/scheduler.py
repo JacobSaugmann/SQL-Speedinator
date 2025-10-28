@@ -111,9 +111,15 @@ class AnalysisScheduler:
                 
                 # Generate report
                 report_generator = PDFReportGenerator(self.config)
+                
+                # Create output filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"scheduled_analysis_{server_name}_{timestamp}.pdf"
+                output_file = output_path / filename
+                
                 report_path = report_generator.generate_report(
                     analysis_results,
-                    output_path,
+                    str(output_file),
                     server_name
                 )
                 

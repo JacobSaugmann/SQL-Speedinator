@@ -190,6 +190,26 @@ class SQLServerConnection:
         """
         return self.execute_query(query)
     
+    def change_database(self, database_name: str) -> bool:
+        """Change current database context
+        
+        Args:
+            database_name (str): Target database name
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            query = f"USE [{database_name}]"
+            cursor = self.connection.cursor()
+            cursor.execute(query)
+            cursor.close()
+            self.logger.debug(f"Changed to database: {database_name}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to change to database {database_name}: {str(e)}")
+            return False
+    
     def __enter__(self):
         """Context manager entry"""
         if self.connect():

@@ -313,7 +313,11 @@ class PDFReportGenerator:
             story.extend(self._create_executive_summary(analysis_results))
             
             # Server Information
-            story.extend(self._create_server_info_section(analysis_results))
+            if 'server_database_info' in analysis_results:
+                server_db_data = analysis_results['server_database_info'].get('data', {})
+                story.extend(self._create_comprehensive_server_info_section(server_db_data))
+            else:
+                story.extend(self._create_server_info_section(analysis_results))
             
             # Wait Statistics Analysis
             if 'wait_stats' in analysis_results:
@@ -342,7 +346,15 @@ class PDFReportGenerator:
                     story.extend(self._create_missing_index_section(missing_data))
             
             # Server Configuration
-            if 'server_config' in analysis_results:
+            if 'server_database_info' in analysis_results and 'data' in analysis_results['server_database_info']:
+                server_db_data = analysis_results['server_database_info']['data']
+                if server_db_data and 'server_configuration' in server_db_data:
+                    # Create a formatted config section from server_database_info data
+                    server_config_formatted = {
+                        'configuration_settings': server_db_data['server_configuration']
+                    }
+                    story.extend(self._create_config_analysis_section(server_config_formatted))
+            elif 'server_config' in analysis_results:
                 story.extend(self._create_config_analysis_section(analysis_results['server_config']))
             
             # AI Analysis Section
@@ -496,15 +508,13 @@ class PDFReportGenerator:
         
         story.append(Paragraph("⏱️ Wait Statistics Analysis", self.styles['KeepTogetherSection']))
         
-        story.append(Paragraph("Executive Summary", self.styles['SubHeader']))
-        
         wait_types = wait_stats.get('wait_types', [])
         if wait_types:
-            summary_text = f"Analyzed {len(wait_types)} wait types. "
             high_waits = [w for w in wait_types if w.get('wait_time_ms', 0) > 10000]
             if high_waits:
-                summary_text += f"Found {len(high_waits)} high-impact wait types requiring attention."
-            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+                story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
+                summary_text = f"Analyzed {len(wait_types)} wait types. Found {len(high_waits)} high-impact wait types requiring attention."
+                story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
         
         story.append(Spacer(1, 0.02*inch))
         
@@ -544,20 +554,19 @@ class PDFReportGenerator:
         
         story.append(Paragraph("💾 Disk Performance Analysis", self.styles['KeepTogetherSection']))
         
-        story.append(Paragraph("Executive Summary", self.styles['SubHeader']))
-        
         io_stats = disk_performance.get('io_statistics', [])
         if io_stats:
             avg_read_latency = sum(stat.get('avg_read_latency_ms', 0) for stat in io_stats) / len(io_stats)
             avg_write_latency = sum(stat.get('avg_write_latency_ms', 0) for stat in io_stats) / len(io_stats)
             
-            summary_text = f"""
-            Analyzed {len(io_stats)} database files. Average read latency: {avg_read_latency:.1f}ms, 
-            write latency: {avg_write_latency:.1f}ms. 
-            {'Performance is within acceptable ranges.' if avg_read_latency < 20 and avg_write_latency < 20 
-             else 'High latency detected - optimization recommended.'}
-            """
-            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+            # Only show if there are performance issues
+            if avg_read_latency >= 20 or avg_write_latency >= 20:
+                story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
+                summary_text = f"""
+                Analyzed {len(io_stats)} database files. Average read latency: {avg_read_latency:.1f}ms, 
+                write latency: {avg_write_latency:.1f}ms. High latency detected - optimization recommended.
+                """
+                story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
         
         story.append(Spacer(1, 0.02*inch))
         
@@ -590,19 +599,20 @@ class PDFReportGenerator:
         
         story.append(Paragraph("📑 Index Analysis", self.styles['KeepTogetherSection']))
         
-        story.append(Paragraph("Executive Summary", self.styles['SubHeader']))
-        
         # Summary of index issues
         rebuild_indexes = index_analysis.get('rebuild_recommendations', [])
         reorg_indexes = index_analysis.get('reorganize_recommendations', [])
         unused_indexes = index_analysis.get('unused_indexes', [])
         
-        summary_text = f"""
-        Index maintenance analysis complete. Found {len(rebuild_indexes)} indexes requiring rebuild, 
-        {len(reorg_indexes)} needing reorganization, and {len(unused_indexes)} unused indexes 
-        that could be considered for removal.
-        """
-        story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
+        # Only show summary if there are issues
+        if rebuild_indexes or reorg_indexes or unused_indexes:
+            story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
+            summary_text = f"""
+            Index maintenance analysis found {len(rebuild_indexes)} indexes requiring rebuild, 
+            {len(reorg_indexes)} needing reorganization, and {len(unused_indexes)} unused indexes 
+            that could be considered for removal.
+            """
+            story.append(Paragraph(summary_text, self.styles['ExecutiveSummary']))
         
         story.append(Spacer(1, 0.02*inch))
         
@@ -695,32 +705,43 @@ class PDFReportGenerator:
         
         config_settings = server_config.get('configuration_settings', [])
         if config_settings:
-            # Only show non-default or important settings
-            important_configs = [
-                cfg for cfg in config_settings 
-                if cfg.get('value') != cfg.get('default_value') or 
-                cfg.get('name') in ['max server memory (MB)', 'min server memory (MB)', 'max degree of parallelism']
-            ]
+            # Only show configurations with issues (not OK)
+            problem_configs = []
+            for cfg in config_settings:
+                status = cfg.get('best_practice_status', 'OK')
+                if not status.startswith('OK') and status != 'OK':
+                    problem_configs.append(cfg)
             
-            if important_configs:
-                table_data = [['Setting', 'Current', 'Default', 'Status']]
+            if problem_configs:
+                story.append(Paragraph("Issues Found:", self.styles['SubHeader']))
+                table_data = [['Setting', 'Current Value', 'Status']]
                 
-                for cfg in important_configs[:10]:  # Top 10
-                    current_val = cfg.get('value', 'N/A')
-                    default_val = cfg.get('default_value', 'N/A')
-                    status = 'Custom' if current_val != default_val else 'Default'
+                for cfg in problem_configs:
+                    name = cfg.get('name', 'Unknown')
+                    current_val = str(cfg.get('value_in_use', cfg.get('value', 'N/A')))
+                    status = cfg.get('best_practice_status', 'OK')
+                    
+                    # Color code the status
+                    if status.startswith('WARNING'):
+                        status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                    elif status.startswith('CRITICAL'):
+                        status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                    else:
+                        status_text = Paragraph(f"<font color='gray'>{status}</font>", self.styles['Normal'])
                     
                     table_data.append([
-                        cfg.get('name', 'Unknown')[:25],
-                        str(current_val),
-                        str(default_val),
-                        status
+                        name[:30],  # Truncate long names
+                        current_val,
+                        status_text
                     ])
                 
-                config_table = Table(table_data, colWidths=self._get_responsive_column_widths(4))
-                config_table.setStyle(self._get_modern_table_style())
+                config_table = Table(table_data, colWidths=self._get_responsive_column_widths(3))
+                config_table.setStyle(self._get_modern_table_style(
+                    header_color=self.schultz_colors['cyan']
+                ))
                 story.append(config_table)
                 story.append(Spacer(1, 0.02*inch))
+        # If no issues, don't show anything - section will be empty
         
         return story
 
@@ -827,5 +848,205 @@ class PDFReportGenerator:
             "AI Analysis powered by Azure OpenAI • Results should be validated by database professionals", 
             disclaimer_style
         ))
+        
+        return story
+    
+    def _create_comprehensive_server_info_section(self, server_db_info: Dict[str, Any]) -> List:
+        """Create comprehensive server and database information section"""
+        story = []
+        
+        # Server Instance Information
+        story.append(Paragraph("🖥️ SQL Server Instance Information", self.styles['KeepTogetherSection']))
+        
+        instance_info = server_db_info.get('server_instance_info', {})
+        if instance_info:
+            # Basic server info
+            basic_data = []
+            for key, display_name in [
+                ('server_name', 'Server Name'),
+                ('edition', 'Edition'),
+                ('product_version', 'Version'),
+                ('product_level', 'Service Pack'),
+                ('machine_name', 'Machine'),
+                ('instance_name', 'Instance'),
+                ('collation', 'Collation'),
+                ('is_clustered', 'Clustered'),
+                ('is_hadr_enabled', 'Always On Enabled')
+            ]:
+                value = instance_info.get(key)
+                if value is not None and str(value) != 'None':
+                    basic_data.append([display_name, str(value)])
+            
+            if basic_data:
+                table = Table(basic_data, colWidths=self._get_responsive_column_widths(2))
+                table.setStyle(self._get_modern_table_style())
+                story.append(table)
+            else:
+                story.append(Paragraph("No server instance information available", self.styles['Normal']))
+        else:
+            story.append(Paragraph("No server instance information available", self.styles['Normal']))
+        
+        story.append(Spacer(1, 0.1*inch))
+        
+        # Memory Information
+        story.append(Paragraph("💾 Memory Information", self.styles['KeepTogetherSub']))
+        
+        memory_info = server_db_info.get('memory_info', {})
+        if memory_info:
+            memory_data = []
+            memory_data.append(['Total Physical Memory (GB)', f"{memory_info.get('total_physical_memory_gb', 'N/A')}"])
+            memory_data.append(['Committed Memory (GB)', f"{memory_info.get('committed_memory_gb', 'N/A')}"])
+            memory_data.append(['Memory Usage %', f"{memory_info.get('memory_usage_percentage', 'N/A')}%"])
+            memory_data.append(['Memory Pressure', memory_info.get('memory_pressure', 'N/A')])
+            memory_data.append(['Max Workers', memory_info.get('max_workers_count', 'N/A')])
+            
+            table = Table(memory_data, colWidths=self._get_responsive_column_widths(2))
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+        
+        story.append(Spacer(1, 0.1*inch))
+        
+        # CPU Information
+        story.append(Paragraph("⚡ CPU Information", self.styles['KeepTogetherSub']))
+        
+        cpu_info = server_db_info.get('cpu_info', {})
+        if cpu_info:
+            cpu_data = []
+            cpu_data.append(['Logical CPUs', cpu_info.get('cpu_count', 'N/A')])
+            cpu_data.append(['Physical CPUs', cpu_info.get('physical_cpu_count', 'N/A')])
+            cpu_data.append(['Hyperthread Ratio', cpu_info.get('hyperthread_ratio', 'N/A')])
+            cpu_data.append(['Schedulers', cpu_info.get('scheduler_count', 'N/A')])
+            
+            table = Table(cpu_data, colWidths=self._get_responsive_column_widths(2))
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+        
+        story.append(Spacer(1, 0.1*inch))
+        
+        # Server Configuration with Best Practices
+        story.append(Paragraph("⚙️ Server Configuration & Best Practices", self.styles['KeepTogetherSub']))
+        
+        config_data = server_db_info.get('server_configuration', [])
+        if config_data:
+            config_table_data = [['Setting', 'Current Value', 'Status']]
+            
+            for config in config_data:
+                name = config.get('name', '')
+                value = str(config.get('value_in_use', config.get('value', '')))
+                status = config.get('best_practice_status', 'OK')
+                
+                # Color code the status
+                if status.startswith('WARNING'):
+                    status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                elif status.startswith('CRITICAL'):
+                    status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                else:
+                    status_text = Paragraph(f"<font color='green'>{status}</font>", self.styles['Normal'])
+                
+                config_table_data.append([name, value, status_text])
+            
+            table = Table(config_table_data, colWidths=[2.5*inch, 1.5*inch, 2.5*inch])
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+        
+        story.append(PageBreak())
+        
+        # Database Overview
+        story.append(Paragraph("🗄️ Database Overview", self.styles['KeepTogetherSection']))
+        
+        databases = server_db_info.get('database_overview', [])
+        if databases:
+            db_table_data = [['Database', 'Recovery Model', 'Compatibility', 'State', 'Issues']]
+            
+            for db in databases:
+                name = db.get('database_name', '')
+                recovery = db.get('recovery_model', '')
+                compat = str(db.get('compatibility_level', ''))
+                state = db.get('state', '')
+                issues = db.get('configuration_issues', 'OK')
+                
+                # Color code issues
+                if issues.startswith('WARNING'):
+                    issues_text = Paragraph(f"<font color='orange'>{issues}</font>", self.styles['Normal'])
+                elif issues.startswith('CRITICAL'):
+                    issues_text = Paragraph(f"<font color='red'>{issues}</font>", self.styles['Normal'])
+                else:
+                    issues_text = Paragraph(f"<font color='green'>{issues}</font>", self.styles['Normal'])
+                
+                db_table_data.append([name, recovery, compat, state, issues_text])
+            
+            table = Table(db_table_data, colWidths=[1.5*inch, 1*inch, 0.8*inch, 1*inch, 2.2*inch])
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+        
+        story.append(Spacer(1, 0.1*inch))
+        
+        # Database Files Information
+        story.append(Paragraph("📁 Database Files", self.styles['KeepTogetherSub']))
+        
+        db_files = server_db_info.get('database_files', [])
+        if db_files:
+            files_table_data = [['Database', 'File Type', 'Size (MB)', 'Growth', 'Issues']]
+            
+            for file_info in db_files:
+                db_name = file_info.get('database_name', '')
+                file_type = file_info.get('file_type', '')
+                size_mb = f"{file_info.get('size_mb', 0):.1f}"
+                growth = file_info.get('growth_desc', '')
+                issues = file_info.get('growth_issues', 'OK')
+                
+                # Color code issues
+                if issues.startswith('WARNING'):
+                    issues_text = Paragraph(f"<font color='orange'>{issues}</font>", self.styles['Normal'])
+                else:
+                    issues_text = Paragraph(f"<font color='green'>{issues}</font>", self.styles['Normal'])
+                
+                files_table_data.append([db_name, file_type, size_mb, growth, issues_text])
+            
+            table = Table(files_table_data, colWidths=[1.5*inch, 1*inch, 1*inch, 1.5*inch, 1.5*inch])
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
+        
+        story.append(Spacer(1, 0.1*inch))
+        
+        # Backup Information
+        story.append(Paragraph("💾 Backup Status", self.styles['KeepTogetherSub']))
+        
+        backup_info = server_db_info.get('backup_info', [])
+        if backup_info:
+            backup_table_data = [['Database', 'Last Full Backup', 'Last Log Backup', 'Status']]
+            
+            for backup in backup_info:
+                db_name = backup.get('database_name', '')
+                last_full = backup.get('last_full_backup', 'Never')
+                last_log = backup.get('last_log_backup', 'N/A')
+                status = backup.get('backup_status', 'Unknown')
+                
+                # Format dates
+                if last_full and last_full != 'Never':
+                    try:
+                        last_full = str(last_full)[:19]  # Remove microseconds
+                    except:
+                        pass
+                
+                if last_log and last_log != 'N/A':
+                    try:
+                        last_log = str(last_log)[:19]  # Remove microseconds
+                    except:
+                        pass
+                
+                # Color code status
+                if status.startswith('CRITICAL'):
+                    status_text = Paragraph(f"<font color='red'>{status}</font>", self.styles['Normal'])
+                elif status.startswith('WARNING'):
+                    status_text = Paragraph(f"<font color='orange'>{status}</font>", self.styles['Normal'])
+                else:
+                    status_text = Paragraph(f"<font color='green'>{status}</font>", self.styles['Normal'])
+                
+                backup_table_data.append([db_name, str(last_full), str(last_log), status_text])
+            
+            table = Table(backup_table_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 2*inch])
+            table.setStyle(self._get_modern_table_style())
+            story.append(table)
         
         return story

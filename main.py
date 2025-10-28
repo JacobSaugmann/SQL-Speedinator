@@ -88,9 +88,13 @@ Examples:
         help="Configuration file path (default: .env)"
     )
     
-    args = parser.parse_args()
-    
-    # Setup logging
+    parser.add_argument(
+        "--ai-analysis",
+        action="store_true",
+        help="Run enhanced AI-powered analysis with advanced recommendations"
+    )
+
+    args = parser.parse_args()    # Setup logging
     setup_logging(args.night_mode)
     logger = logging.getLogger(__name__)
     
@@ -110,7 +114,7 @@ Examples:
         else:
             # Run single analysis
             logger.info(f"Starting SQL Server analysis for: {args.server}")
-            run_analysis(args.server, output_path, config, args.night_mode)
+            run_analysis(args.server, output_path, config, args.night_mode, args.ai_analysis)
             
     except KeyboardInterrupt:
         logger.info("Analysis interrupted by user")
@@ -121,9 +125,16 @@ Examples:
     
     return 0
 
-def run_analysis(server_name, output_path, config, night_mode=False):
+def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis=False):
     """Run a single analysis"""
     logger = logging.getLogger(__name__)
+    
+    # Enable AI analysis if requested via command line
+    if ai_analysis:
+        # Temporarily override the AI_ANALYSIS_ENABLED setting
+        import os
+        os.environ['AI_ANALYSIS_ENABLED'] = 'true'
+        logger.info("AI analysis enabled via command line flag")
     
     # Create connection
     logger.info("Establishing SQL Server connection...")
@@ -143,9 +154,15 @@ def run_analysis(server_name, output_path, config, night_mode=False):
         # Generate report
         logger.info("Generating PDF report...")
         report_generator = PDFReportGenerator(config)
+        
+        # Create output filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"sql_analysis_{server_name}_{timestamp}.pdf"
+        output_file = output_path / filename
+        
         report_path = report_generator.generate_report(
             analysis_results, 
-            output_path, 
+            str(output_file), 
             server_name
         )
         

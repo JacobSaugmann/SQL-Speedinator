@@ -12,12 +12,14 @@ from pathlib import Path
 
 from ..analyzers.disk_analyzer import DiskAnalyzer
 from ..analyzers.index_analyzer import IndexAnalyzer
+from ..analyzers.advanced_index_analyzer import AdvancedIndexAnalyzer, IndexAnalysisSettings
 from ..analyzers.server_config_analyzer import ServerConfigAnalyzer
 from ..analyzers.tempdb_analyzer import TempDBAnalyzer
 from ..analyzers.plan_cache_analyzer import PlanCacheAnalyzer
 from ..analyzers.wait_stats_analyzer import WaitStatsAnalyzer
 from ..analyzers.missing_index_analyzer import MissingIndexAnalyzer
 from ..analyzers.ai_analyzer import AIAnalyzer
+from ..analyzers.server_database_analyzer import ServerDatabaseAnalyzer
 
 class PerformanceAnalyzer:
     """Main class for coordinating SQL Server performance analysis"""
@@ -38,12 +40,17 @@ class PerformanceAnalyzer:
         # Initialize analyzers
         self.disk_analyzer = DiskAnalyzer(connection, config)
         self.index_analyzer = IndexAnalyzer(connection, config)
+        self.advanced_index_analyzer = AdvancedIndexAnalyzer(connection)
+        self.server_config_analyzer = ServerConfigAnalyzer(connection, config)
+        self.tempdb_analyzer = TempDBAnalyzer(connection, config)
+        self.index_analyzer = IndexAnalyzer(connection, config)
         self.server_config_analyzer = ServerConfigAnalyzer(connection, config)
         self.tempdb_analyzer = TempDBAnalyzer(connection, config)
         self.plan_cache_analyzer = PlanCacheAnalyzer(connection, config)
         self.wait_stats_analyzer = WaitStatsAnalyzer(connection, config)
         self.missing_index_analyzer = MissingIndexAnalyzer(connection, config)
         self.ai_analyzer = AIAnalyzer(config)
+        self.server_database_analyzer = ServerDatabaseAnalyzer(connection, config)
         
         self.analysis_results = {}
     
@@ -67,9 +74,11 @@ class PerformanceAnalyzer:
         
         # Define analysis steps
         analysis_steps = [
+            ('server_database_info', 'Server and Database Information', self.server_database_analyzer.analyze),
             ('wait_stats', 'Wait Statistics Analysis', self.wait_stats_analyzer.analyze),
             ('disk_performance', 'Disk Performance Analysis', self.disk_analyzer.analyze),
             ('index_analysis', 'Index Analysis', self.index_analyzer.analyze),
+            ('advanced_index_analysis', 'Advanced Index Analysis', self._analyze_advanced_indexes),
             ('missing_indexes', 'Missing Index Analysis', self.missing_index_analyzer.analyze),
             ('server_config', 'Server Configuration Analysis', self.server_config_analyzer.analyze),
             ('tempdb_analysis', 'TempDB Analysis', self.tempdb_analyzer.analyze),
@@ -117,6 +126,10 @@ class PerformanceAnalyzer:
         self.analysis_results['summary'] = self._generate_summary()
         self.analysis_results['recommendations'] = self._generate_recommendations()
         
+        # Update summary with recommendations count
+        if 'recommendations' in self.analysis_results:
+            self.analysis_results['summary']['recommendations_count'] = len(self.analysis_results['recommendations'])
+        
         # Run AI analysis if enabled
         if self.config.be_my_copilot:
             try:
@@ -158,10 +171,18 @@ class PerformanceAnalyzer:
             'critical_issues': [],
             'warnings': [],
             'recommendations_count': 0,
-            'overall_health_score': 0
+            'overall_health_score': 0,
+            'total_databases': 0,
+            'total_issues': 0
         }
         
         try:
+            # Count total databases from ServerDatabaseAnalyzer
+            if 'server_database_info' in self.analysis_results and 'data' in self.analysis_results['server_database_info']:
+                server_db_data = self.analysis_results['server_database_info']['data']
+                if server_db_data and 'database_overview' in server_db_data:
+                    summary['total_databases'] = len(server_db_data['database_overview'])
+            
             # Analyze results for critical issues
             health_score = 100
             
@@ -200,6 +221,21 @@ class PerformanceAnalyzer:
                         summary['warnings'].append(f"{high_impact_count} high-impact missing indexes found")
                         health_score -= 5
             
+            # Check server configuration issues from ServerDatabaseAnalyzer
+            if 'server_database_info' in self.analysis_results and 'data' in self.analysis_results['server_database_info']:
+                server_db_data = self.analysis_results['server_database_info']['data']
+                if server_db_data and 'server_configuration' in server_db_data:
+                    for config in server_db_data['server_configuration']:
+                        status = config.get('best_practice_status', 'OK')
+                        if status.startswith('WARNING'):
+                            summary['warnings'].append(status)
+                            health_score -= 3
+                        elif status.startswith('CRITICAL'):
+                            summary['critical_issues'].append(status)
+                            health_score -= 10
+            
+            # Calculate total issues
+            summary['total_issues'] = len(summary['critical_issues']) + len(summary['warnings'])
             summary['overall_health_score'] = max(0, health_score)
             
         except Exception as e:
@@ -240,7 +276,26 @@ class PerformanceAnalyzer:
                             'impact': f"Estimated improvement: {idx.get('avg_user_impact', 0):.1f}%"
                         })
             
-            # Configuration recommendations
+            # Configuration recommendations from ServerDatabaseAnalyzer
+            if 'server_database_info' in self.analysis_results and 'data' in self.analysis_results['server_database_info']:
+                server_db_data = self.analysis_results['server_database_info']['data']
+                if server_db_data and 'server_configuration' in server_db_data:
+                    for config in server_db_data['server_configuration']:
+                        status = config.get('best_practice_status', 'OK')
+                        name = config.get('name', 'Unknown Setting')
+                        value = config.get('value_in_use', config.get('value', ''))
+                        
+                        if status.startswith('WARNING') or status.startswith('CRITICAL'):
+                            priority = 'HIGH' if status.startswith('CRITICAL') else 'MEDIUM'
+                            recommendations.append({
+                                'priority': priority,
+                                'category': 'Server Configuration',
+                                'issue': f"{name} configuration issue",
+                                'recommendation': status,
+                                'impact': f"Current value: {value}"
+                            })
+            
+            # Configuration recommendations from ServerConfigAnalyzer
             if 'server_config' in self.analysis_results and 'data' in self.analysis_results['server_config']:
                 config_data = self.analysis_results['server_config']['data']
                 if config_data and 'issues' in config_data:
@@ -279,3 +334,74 @@ class PerformanceAnalyzer:
         }
         
         return recommendations.get(wait_type, 'Review SQL Server documentation for this wait type')
+    
+    def _analyze_advanced_indexes(self):
+        """Run advanced index analysis with configurable settings"""
+        try:
+            # Create settings from config
+            settings = IndexAnalysisSettings(
+                min_advantage=self.config.index_min_advantage,
+                get_selectability=self.config.index_calculate_selectability,
+                only_index_analysis=self.config.index_only_analysis,
+                limit_to_tablename=self.config.index_limit_to_table,
+                limit_to_indexname=self.config.index_limit_to_index
+            )
+            
+            # Run analysis
+            results = self.advanced_index_analyzer.analyze_indexes(settings)
+            
+            # Convert to dict format for consistency
+            analysis_data = {
+                'missing_indexes_count': len(results.missing_indexes),
+                'existing_indexes_count': len(results.existing_indexes),
+                'overlapping_indexes_count': len(results.overlapping_indexes),
+                'unused_indexes_count': len(results.unused_indexes),
+                'total_wasted_space_mb': results.total_wasted_space_mb,
+                'metadata_age_days': results.metadata_age_days,
+                'warnings': results.warnings,
+                'top_recommendations': self.advanced_index_analyzer.get_index_recommendations(results, 10),
+                'maintenance_recommendations': self.advanced_index_analyzer.get_maintenance_recommendations(results),
+                'missing_indexes': [
+                    {
+                        'table_name': idx.table_name,
+                        'equality_columns': idx.equality_columns,
+                        'inequality_columns': idx.inequality_columns,
+                        'included_columns': idx.included_columns,
+                        'advantage_score': idx.create_index_advantage,
+                        'user_impact': idx.avg_user_impact,
+                        'user_cost': idx.avg_total_user_cost,
+                        'user_scans': idx.user_scans,
+                        'user_seeks': idx.user_seeks,
+                        'create_statement': idx.create_index_statement
+                    } for idx in results.missing_indexes[:10]  # Top 10
+                ],
+                'unused_indexes': [
+                    {
+                        'table_name': idx.table_name,
+                        'index_name': idx.index_name,
+                        'drop_statement': idx.drop_statement,
+                        'disable_statement': idx.disable_statement,
+                        'usage_stats': {
+                            'lookups': idx.user_lookups,
+                            'scans': idx.user_scans,
+                            'seeks': idx.user_seeks,
+                            'updates': idx.user_updates
+                        }
+                    } for idx in results.unused_indexes
+                ],
+                'overlapping_indexes': [
+                    {
+                        'table_name': idx.table_name,
+                        'index_name': idx.index_name,
+                        'columns': idx.index_columns,
+                        'overlap_type': idx.overlap_type,
+                        'disable_statement': idx.disable_statement
+                    } for idx in results.overlapping_indexes
+                ]
+            }
+            
+            return analysis_data
+            
+        except Exception as e:
+            self.logger.error(f"Advanced index analysis failed: {e}")
+            return {'error': str(e)}

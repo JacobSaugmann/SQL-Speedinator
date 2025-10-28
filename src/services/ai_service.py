@@ -30,15 +30,32 @@ class AIService:
                 raise ValueError("Invalid AI configuration. Check required Azure OpenAI settings.")
             
             try:
-                self.client = AzureOpenAI(
-                    api_key=config.azure_openai_api_key,
-                    api_version=config.azure_openai_api_version,
-                    azure_endpoint=config.azure_openai_endpoint
-                )
-                self.logger.info("Azure OpenAI client initialized successfully")
+                # Initialize without proxy settings to avoid compatibility issues
+                import os
+                # Temporarily clear proxy environment variables if they exist
+                proxy_env_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']
+                original_proxy_values = {}
+                for var in proxy_env_vars:
+                    if var in os.environ:
+                        original_proxy_values[var] = os.environ[var]
+                        del os.environ[var]
+                
+                try:
+                    self.client = AzureOpenAI(
+                        api_key=config.azure_openai_api_key,
+                        api_version=config.azure_openai_api_version,
+                        azure_endpoint=config.azure_openai_endpoint
+                    )
+                    self.logger.info("Azure OpenAI client initialized successfully")
+                finally:
+                    # Restore proxy environment variables
+                    for var, value in original_proxy_values.items():
+                        os.environ[var] = value
+                        
             except Exception as e:
                 self.logger.error(f"Failed to initialize Azure OpenAI client: {e}")
-                raise
+                self.logger.warning("Continuing without AI analysis...")
+                self.client = None
     
     def is_enabled(self) -> bool:
         """Check if AI service is enabled and configured"""

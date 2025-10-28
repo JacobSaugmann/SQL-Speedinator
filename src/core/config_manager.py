@@ -83,6 +83,32 @@ class ConfigManager:
     def sql_trusted_connection(self):
         return self.get('SQL_TRUSTED_CONNECTION', 'yes', bool)
     
+    # Advanced Index Analysis Settings
+    @property
+    def index_min_advantage(self):
+        """Get minimum advantage threshold for missing indexes"""
+        return self.get('INDEX_MIN_ADVANTAGE', 80, int)
+    
+    @property
+    def index_calculate_selectability(self):
+        """Get selectability calculation setting"""
+        return self.get('INDEX_CALCULATE_SELECTABILITY', False, bool)
+    
+    @property
+    def index_only_analysis(self):
+        """Get index only analysis setting"""
+        return self.get('INDEX_ONLY_ANALYSIS', True, bool)
+    
+    @property
+    def index_limit_to_table(self):
+        """Get table name filter for index analysis"""
+        return self.get('INDEX_LIMIT_TO_TABLE', '')
+    
+    @property
+    def index_limit_to_index(self):
+        """Get index name filter for index analysis"""
+        return self.get('INDEX_LIMIT_TO_INDEX', '')
+    
     @property
     def sql_driver(self):
         return self.get('SQL_DRIVER', 'ODBC Driver 17 for SQL Server')
@@ -137,7 +163,7 @@ class ConfigManager:
     # AI Copilot Settings
     @property
     def be_my_copilot(self):
-        return self.get('BE_MY_COPILOT', False, bool)
+        return self.get('AI_ANALYSIS_ENABLED', False, bool)
     
     @property
     def azure_openai_endpoint(self):

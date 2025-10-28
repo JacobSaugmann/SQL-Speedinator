@@ -128,18 +128,18 @@ class DiskAnalyzer:
             physical_name,
             type_desc,
             state_desc,
-            size * 8 / 1024 AS size_mb,
+            CAST(size AS BIGINT) * 8 / 1024 AS size_mb,
             max_size,
             growth,
             is_percent_growth,
             CASE 
                 WHEN max_size = -1 THEN 'UNLIMITED'
                 WHEN max_size = 0 THEN 'NO GROWTH'
-                ELSE CAST(max_size * 8 / 1024 AS VARCHAR) + ' MB'
+                ELSE CAST(CAST(max_size AS BIGINT) * 8 / 1024 AS VARCHAR) + ' MB'
             END AS max_size_desc,
             CASE
                 WHEN is_percent_growth = 1 THEN CAST(growth AS VARCHAR) + '%'
-                ELSE CAST(growth * 8 / 1024 AS VARCHAR) + ' MB'
+                ELSE CAST(CAST(growth AS BIGINT) * 8 / 1024 AS VARCHAR) + ' MB'
             END AS growth_desc
         FROM sys.master_files
         WHERE database_id > 4  -- Exclude system databases

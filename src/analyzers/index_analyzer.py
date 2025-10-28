@@ -21,6 +21,20 @@ class IndexAnalyzer:
         self.config = config
         self.logger = logging.getLogger(__name__)
     
+    def _get_user_databases(self) -> List[str]:
+        """Get list of user databases (excluding system databases)"""
+        query = """
+        SELECT name 
+        FROM sys.databases 
+        WHERE database_id > 4 
+        AND state = 0  -- Online only
+        AND is_read_only = 0  -- Exclude read-only databases
+        ORDER BY name
+        """
+        
+        result = self.connection.execute_query(query)
+        return [row['name'] for row in result] if result else []
+    
     def analyze(self) -> Dict[str, Any]:
         """Run complete index analysis
         
@@ -83,7 +97,29 @@ class IndexAnalyzer:
     
     def _get_unused_indexes(self) -> Optional[List[Dict[str, Any]]]:
         """Find indexes that are never used for seeks, scans, or lookups"""
-        query = """
+        
+        unused_indexes = []
+        user_databases = self._get_user_databases()
+        
+        if not user_databases:
+            self.logger.warning("No user databases found for unused index analysis")
+            return None
+        
+        # Save current database context (likely master)
+        original_db_query = "SELECT DB_NAME() as current_db"
+        original_db_result = self.connection.execute_query(original_db_query)
+        original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
+        
+        try:
+            for db_name in user_databases:
+                self.logger.debug(f"Analyzing unused indexes in database: {db_name}")
+                
+                # Change to user database
+                if not self.connection.change_database(db_name):
+                    self.logger.warning(f"Could not access database {db_name}, skipping...")
+                    continue
+                
+                query = """
         SELECT 
             DB_NAME() AS database_name,
             OBJECT_SCHEMA_NAME(i.object_id) AS schema_name,
@@ -104,7 +140,7 @@ class IndexAnalyzer:
             p.rows AS table_rows,
             CAST(SUM(a.total_pages) * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb
         FROM sys.indexes i
-        LEFT JOIN sys.dm_db_index_usage_stats us ON i.object_id = us.object_id AND i.index_id = us.index_id
+        LEFT JOIN sys.dm_db_index_usage_stats us ON i.object_id = us.object_id AND i.index_id = us.index_id AND us.database_id = DB_ID()
         INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
         INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
         WHERE i.type > 0  -- Exclude heaps
@@ -121,9 +157,19 @@ class IndexAnalyzer:
         HAVING (ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0)) = 0
         OR (us.last_user_seek IS NULL AND us.last_user_scan IS NULL AND us.last_user_lookup IS NULL)
         ORDER BY size_mb DESC
-        """
+                """
+                
+                db_result = self.connection.execute_query(query)
+                if db_result:
+                    unused_indexes.extend(db_result)
+                    
+        except Exception as e:
+            self.logger.error(f"Error during unused index analysis: {str(e)}")
+        finally:
+            # Restore original database context
+            self.connection.change_database(original_db)
         
-        return self.connection.execute_query(query)
+        return unused_indexes if unused_indexes else None
     
     def _find_duplicate_indexes(self) -> Optional[List[Dict[str, Any]]]:
         """Find potentially duplicate or overlapping indexes"""
@@ -254,13 +300,14 @@ class IndexAnalyzer:
                 ips.avg_fragmentation_in_percent,
                 ips.page_count,
                 ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0) AS TotalReads
-            FROM sys.dm_db_index_physical_stats(DB_ID(), NULL, NULL, NULL, 'LIMITED') AS ips
+            FROM sys.dm_db_index_physical_stats(NULL, NULL, NULL, NULL, 'LIMITED') AS ips
             INNER JOIN sys.indexes AS i ON ips.object_id = i.object_id AND ips.index_id = i.index_id
             INNER JOIN sys.tables AS t ON i.object_id = t.object_id
             INNER JOIN sys.schemas AS s ON t.schema_id = s.schema_id
-            LEFT JOIN sys.dm_db_index_usage_stats AS us ON i.object_id = us.object_id AND i.index_id = us.index_id AND us.database_id = DB_ID()
+            LEFT JOIN sys.dm_db_index_usage_stats AS us ON i.object_id = us.object_id AND i.index_id = us.index_id AND us.database_id = ips.database_id
             WHERE ips.avg_fragmentation_in_percent > 30
               AND ips.page_count > 500  -- Only large indexes
+              AND ips.database_id > 4  -- Exclude system databases
         )
         SELECT
             SchemaName,

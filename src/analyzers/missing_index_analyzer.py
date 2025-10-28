@@ -21,6 +21,20 @@ class MissingIndexAnalyzer:
         self.config = config
         self.logger = logging.getLogger(__name__)
     
+    def _get_user_databases(self) -> List[str]:
+        """Get list of user databases (excluding system databases)"""
+        query = """
+        SELECT name 
+        FROM sys.databases 
+        WHERE database_id > 4 
+        AND state = 0  -- Online only
+        AND is_read_only = 0  -- Exclude read-only databases
+        ORDER BY name
+        """
+        
+        result = self.connection.execute_query(query)
+        return [row['name'] for row in result] if result else []
+    
     def analyze(self) -> Dict[str, Any]:
         """Run complete missing index analysis
         
@@ -84,7 +98,7 @@ class MissingIndexAnalyzer:
         FROM sys.dm_db_missing_index_groups mig
         INNER JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
         INNER JOIN sys.dm_db_missing_index_details mid ON mig.index_handle = mid.index_handle
-        WHERE mid.database_id = DB_ID()
+        WHERE mid.database_id > 4  -- Exclude system databases
         AND migs.avg_user_impact > 10  -- Only indexes with significant impact
         ORDER BY impact_score DESC
         """
@@ -128,7 +142,7 @@ class MissingIndexAnalyzer:
         FROM sys.dm_db_missing_index_groups mig
         INNER JOIN sys.dm_db_missing_index_group_stats migs ON migs.group_handle = mig.index_group_handle
         INNER JOIN sys.dm_db_missing_index_details mid ON mig.index_handle = mid.index_handle
-        WHERE mid.database_id = DB_ID()
+        WHERE mid.database_id > 4  -- Exclude system databases
         """
         
         return self.connection.execute_query(query)
