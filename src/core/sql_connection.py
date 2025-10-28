@@ -183,7 +183,7 @@ class SQLServerConnection:
             CAST(SERVERPROPERTY('ProductVersion') AS VARCHAR(50)) as product_version,
             CAST(SERVERPROPERTY('ProductLevel') AS VARCHAR(50)) as product_level,
             CAST(SERVERPROPERTY('Edition') AS VARCHAR(200)) as edition,
-            SERVERPROPERTY('EngineEdition') as engine_edition,
+            CAST(SERVERPROPERTY('EngineEdition') AS INT) as engine_edition,
             CAST(SERVERPROPERTY('MachineName') AS VARCHAR(100)) as machine_name,
             CAST(SERVERPROPERTY('InstanceName') AS VARCHAR(100)) as instance_name,
             CAST(SERVERPROPERTY('Collation') AS VARCHAR(100)) as collation

@@ -6,6 +6,7 @@ Inspired by the great ones and SQL Server community recommendations
 
 import logging
 from typing import Dict, Any, List, Optional
+from src.core.sql_version_manager import SQLVersionManager
 
 class ServerConfigAnalyzer:
     """Analyzes SQL Server configuration for best practices compliance"""
@@ -20,6 +21,7 @@ class ServerConfigAnalyzer:
         self.connection = connection
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.version_manager = SQLVersionManager(connection)
     
     def analyze(self) -> Dict[str, Any]:
         """Run complete server configuration analysis
@@ -47,80 +49,73 @@ class ServerConfigAnalyzer:
     
     def _get_server_info(self) -> Optional[List[Dict[str, Any]]]:
         """Get basic server information and version details"""
-        query = """
-        SELECT 
-            @@SERVERNAME as server_name,
-            @@VERSION as version_info,
-            CAST(SERVERPROPERTY('ProductVersion') AS VARCHAR(50)) as product_version,
-            CAST(SERVERPROPERTY('ProductLevel') AS VARCHAR(50)) as product_level,
-            CAST(SERVERPROPERTY('Edition') AS VARCHAR(200)) as edition,
-            SERVERPROPERTY('EngineEdition') as engine_edition,
-            CAST(SERVERPROPERTY('MachineName') AS VARCHAR(100)) as machine_name,
-            CAST(SERVERPROPERTY('InstanceName') AS VARCHAR(100)) as instance_name,
-            CAST(SERVERPROPERTY('Collation') AS VARCHAR(100)) as collation,
-            CAST(SERVERPROPERTY('IsAdvancedAnalyticsInstalled') AS BIT) as advanced_analytics,
-            CAST(SERVERPROPERTY('IsFullTextInstalled') AS BIT) as fulltext_installed,
-            CAST(SERVERPROPERTY('IsIntegratedSecurityOnly') AS BIT) as windows_auth_only,
-            CAST(SERVERPROPERTY('IsClustered') AS BIT) as is_clustered,
-            CAST(SERVERPROPERTY('IsHadrEnabled') AS BIT) as is_hadr_enabled,
-            GETDATE() as analysis_time,
-            @@LANGUAGE as language_setting,
-            @@LOCK_TIMEOUT as lock_timeout,
-            @@MAX_CONNECTIONS as max_connections,
-            @@SPID as current_spid
-        """
-        
+        query = self.version_manager.get_compatible_server_info_query()
         return self.connection.execute_query(query)
     
     def _get_configuration_settings(self) -> Optional[List[Dict[str, Any]]]:
         """Get all SQL Server configuration settings"""
-        query = """
-        SELECT 
-            configuration_id,
-            CAST(name AS VARCHAR(100)) as name,
-            value,
-            minimum,
-            maximum,
-            value_in_use,
-            CAST(description AS VARCHAR(500)) as description,
-            is_dynamic,
-            is_advanced
-        FROM sys.configurations
-        ORDER BY name
-        """
-        
+        query = self.version_manager.get_compatible_configuration_query()
         return self.connection.execute_query(query)
     
     def _analyze_memory_configuration(self) -> Dict[str, Any]:
         """Analyze memory-related configuration settings"""
         try:
-            # Get memory settings
-            memory_query = """
-            SELECT
-                CAST(c.name AS VARCHAR(100)) as name,
-                c.value,
-                c.value_in_use,
-                CAST(c.description AS VARCHAR(500)) as description
-            FROM sys.configurations c
-            WHERE c.name IN (
-                'max server memory (MB)',
-                'min server memory (MB)', 
-                'index create memory (KB)',
-                'min memory per query (KB)'
-            )
-            """
+            # Get memory settings with version compatibility
+            capabilities = self.version_manager.get_capabilities()
+            
+            if capabilities['supports_nvarchar_cast']:
+                memory_query = """
+                SELECT
+                    CAST(c.name AS VARCHAR(100)) as name,
+                    CAST(c.value AS VARCHAR(20)) as value,
+                    CAST(c.value_in_use AS VARCHAR(20)) as value_in_use,
+                    CAST(c.description AS VARCHAR(500)) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'max server memory (MB)',
+                    'min server memory (MB)', 
+                    'index create memory (KB)',
+                    'min memory per query (KB)'
+                )
+                """
+            else:
+                memory_query = """
+                SELECT
+                    CONVERT(VARCHAR(100), c.name) as name,
+                    CONVERT(VARCHAR(20), c.value) as value,
+                    CONVERT(VARCHAR(20), c.value_in_use) as value_in_use,
+                    CONVERT(VARCHAR(500), c.description) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'max server memory (MB)',
+                    'min server memory (MB)', 
+                    'index create memory (KB)',
+                    'min memory per query (KB)'
+                )
+                """
             
             memory_settings = self.connection.execute_query(memory_query)
             
-            # Get current memory usage
-            memory_usage_query = """
-            SELECT 
-                (physical_memory_kb / 1024) AS total_physical_memory_mb,
-                (committed_kb / 1024) AS committed_memory_mb,
-                (committed_target_kb / 1024) AS committed_target_mb,
-                (visible_target_kb / 1024) AS visible_target_mb
-            FROM sys.dm_os_sys_info
-            """
+            # Get current memory usage with fallback for older versions
+            if capabilities['has_pages_in_use_kb']:
+                memory_usage_query = """
+                SELECT 
+                    (physical_memory_kb / 1024) AS total_physical_memory_mb,
+                    (committed_kb / 1024) AS committed_memory_mb,
+                    (committed_target_kb / 1024) AS committed_target_mb,
+                    (visible_target_kb / 1024) AS visible_target_mb
+                FROM sys.dm_os_sys_info
+                """
+            else:
+                # Fallback for older versions
+                memory_usage_query = """
+                SELECT 
+                    (physical_memory_in_bytes / 1024 / 1024) AS total_physical_memory_mb,
+                    0 AS committed_memory_mb,
+                    0 AS committed_target_mb,
+                    0 AS visible_target_mb
+                FROM sys.dm_os_sys_info
+                """
             
             memory_usage = self.connection.execute_query(memory_usage_query)
             
@@ -136,7 +131,13 @@ class ServerConfigAnalyzer:
                 
                 for setting in memory_settings:
                     name = setting.get('name')
-                    value = setting.get('value_in_use', 0)
+                    value_str = setting.get('value_in_use', '0')
+                    
+                    # Convert string value to integer for comparison
+                    try:
+                        value = int(float(value_str))
+                    except (ValueError, TypeError):
+                        value = 0
                     
                     if name == 'max server memory (MB)':
                         if value == 2147483647:  # Default unlimited value
@@ -172,44 +173,40 @@ class ServerConfigAnalyzer:
     def _analyze_parallelism_settings(self) -> Dict[str, Any]:
         """Analyze parallelism-related settings"""
         try:
-            parallelism_query = """
-            SELECT 
-                c.name,
-                c.value,
-                c.value_in_use,
-                c.description
-            FROM sys.configurations c
-            WHERE c.name IN (
-                'max degree of parallelism',
-                'cost threshold for parallelism'
-            )
-            """
+            # Get parallelism settings with version compatibility
+            capabilities = self.version_manager.get_capabilities()
+            
+            if capabilities['supports_nvarchar_cast']:
+                parallelism_query = """
+                SELECT 
+                    CAST(c.name AS VARCHAR(100)) as name,
+                    CAST(c.value AS VARCHAR(20)) as value,
+                    CAST(c.value_in_use AS VARCHAR(20)) as value_in_use,
+                    CAST(c.description AS VARCHAR(500)) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'max degree of parallelism',
+                    'cost threshold for parallelism'
+                )
+                """
+            else:
+                parallelism_query = """
+                SELECT 
+                    CONVERT(VARCHAR(100), c.name) as name,
+                    CONVERT(VARCHAR(20), c.value) as value,
+                    CONVERT(VARCHAR(20), c.value_in_use) as value_in_use,
+                    CONVERT(VARCHAR(500), c.description) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'max degree of parallelism',
+                    'cost threshold for parallelism'
+                )
+                """
             
             settings = self.connection.execute_query(parallelism_query)
             
-            # Get CPU information
-            cpu_query = """
-            SELECT 
-                cpu_count,
-                hyperthread_ratio,
-                CASE 
-                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'physical_cpu_count', 'ColumnId') IS NOT NULL 
-                    THEN (SELECT physical_cpu_count FROM sys.dm_os_sys_info)
-                    ELSE cpu_count / hyperthread_ratio
-                END as physical_cpu_count,
-                CASE 
-                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'socket_count', 'ColumnId') IS NOT NULL 
-                    THEN (SELECT socket_count FROM sys.dm_os_sys_info)
-                    ELSE 1
-                END as socket_count,
-                CASE 
-                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'cores_per_socket', 'ColumnId') IS NOT NULL 
-                    THEN (SELECT cores_per_socket FROM sys.dm_os_sys_info)
-                    ELSE cpu_count
-                END as cores_per_socket
-            FROM sys.dm_os_sys_info
-            """
-            
+            # Get CPU information with version compatibility
+            cpu_query = self.version_manager.get_compatible_cpu_info_query()
             cpu_info = self.connection.execute_query(cpu_query)
             
             analysis = {
@@ -223,7 +220,13 @@ class ServerConfigAnalyzer:
                 
                 for setting in settings:
                     name = setting.get('name')
-                    value = setting.get('value_in_use', 0)
+                    value_str = setting.get('value_in_use', '0')
+                    
+                    # Convert string value to integer for comparison
+                    try:
+                        value = int(float(value_str))
+                    except (ValueError, TypeError):
+                        value = 0
                     
                     if name == 'max degree of parallelism':
                         if value == 0:  # Automatic
@@ -348,23 +351,45 @@ class ServerConfigAnalyzer:
     def _analyze_security_settings(self) -> Dict[str, Any]:
         """Analyze security-related configuration"""
         try:
-            security_query = """
-            SELECT 
-                c.name,
-                c.value,
-                c.value_in_use,
-                c.description
-            FROM sys.configurations c
-            WHERE c.name IN (
-                'remote access',
-                'remote admin connections',
-                'Ad Hoc Distributed Queries',
-                'xp_cmdshell',
-                'Database Mail XPs',
-                'Ole Automation Procedures',
-                'SQL Mail XPs'
-            )
-            """
+            # Get security settings with version compatibility
+            capabilities = self.version_manager.get_capabilities()
+            
+            if capabilities['supports_nvarchar_cast']:
+                security_query = """
+                SELECT 
+                    CAST(c.name AS VARCHAR(100)) as name,
+                    CAST(c.value AS VARCHAR(20)) as value,
+                    CAST(c.value_in_use AS VARCHAR(20)) as value_in_use,
+                    CAST(c.description AS VARCHAR(500)) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'remote access',
+                    'remote admin connections',
+                    'Ad Hoc Distributed Queries',
+                    'xp_cmdshell',
+                    'Database Mail XPs',
+                    'Ole Automation Procedures',
+                    'SQL Mail XPs'
+                )
+                """
+            else:
+                security_query = """
+                SELECT 
+                    CONVERT(VARCHAR(100), c.name) as name,
+                    CONVERT(VARCHAR(20), c.value) as value,
+                    CONVERT(VARCHAR(20), c.value_in_use) as value_in_use,
+                    CONVERT(VARCHAR(500), c.description) as description
+                FROM sys.configurations c
+                WHERE c.name IN (
+                    'remote access',
+                    'remote admin connections',
+                    'Ad Hoc Distributed Queries',
+                    'xp_cmdshell',
+                    'Database Mail XPs',
+                    'Ole Automation Procedures',
+                    'SQL Mail XPs'
+                )
+                """
             
             settings = self.connection.execute_query(security_query)
             
@@ -384,7 +409,13 @@ class ServerConfigAnalyzer:
             if settings:
                 for setting in settings:
                     name = setting.get('name')
-                    value = setting.get('value_in_use', 0)
+                    value_str = setting.get('value_in_use', '0')
+                    
+                    # Convert string value to integer for comparison
+                    try:
+                        value = int(float(value_str))
+                    except (ValueError, TypeError):
+                        value = 0
                     
                     if name in risky_settings and value == 1:
                         analysis['issues'].append({

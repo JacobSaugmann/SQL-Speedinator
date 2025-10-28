@@ -1188,7 +1188,7 @@ class PDFReportGenerator:
         
         # Section Header
         story.append(Spacer(1, 0.1*inch))
-        story.append(Paragraph("📊 Performance Monitor Analysis", self.styles['CustomSectionHeader']))
+        story.append(Paragraph("📊 Performance Monitor Analysis", self.styles['SectionHeader']))
         story.append(Spacer(1, 0.05*inch))
         
         if 'error' in perfmon_data:
@@ -1199,7 +1199,7 @@ class PDFReportGenerator:
         # Summary Information
         if 'summary' in perfmon_data:
             summary = perfmon_data['summary']
-            story.append(Paragraph("📈 Collection Summary", self.styles['CustomSubheader']))
+            story.append(Paragraph("📈 Collection Summary", self.styles['SubHeader']))
             
             summary_data = [
                 ['Collection Period', f"{summary.get('duration_minutes', 0):.1f} minutes"],
@@ -1214,7 +1214,7 @@ class PDFReportGenerator:
         
         # Bottlenecks Analysis
         if 'bottlenecks' in perfmon_data and perfmon_data['bottlenecks']:
-            story.append(Paragraph("🚨 Performance Bottlenecks", self.styles['CustomSubheader']))
+            story.append(Paragraph("🚨 Performance Bottlenecks", self.styles['SubHeader']))
             
             bottleneck_data = [['Category', 'Severity', 'Description']]
             
@@ -1241,7 +1241,7 @@ class PDFReportGenerator:
         # CPU Analysis
         if 'cpu_analysis' in perfmon_data:
             cpu = perfmon_data['cpu_analysis']
-            story.append(Paragraph("🖥️ CPU Performance", self.styles['CustomSubheader']))
+            story.append(Paragraph("🖥️ CPU Performance", self.styles['SubHeader']))
             
             cpu_data = [['Metric', 'Value', 'Status']]
             
@@ -1280,7 +1280,7 @@ class PDFReportGenerator:
         # Memory Analysis
         if 'memory_analysis' in perfmon_data:
             memory = perfmon_data['memory_analysis']
-            story.append(Paragraph("🧠 Memory Performance", self.styles['CustomSubheader']))
+            story.append(Paragraph("🧠 Memory Performance", self.styles['SubHeader']))
             
             memory_data = [['Metric', 'Value', 'Status']]
             
@@ -1319,7 +1319,7 @@ class PDFReportGenerator:
         # Disk Analysis
         if 'disk_analysis' in perfmon_data:
             disk = perfmon_data['disk_analysis']
-            story.append(Paragraph("💾 Disk Performance", self.styles['CustomSubheader']))
+            story.append(Paragraph("💾 Disk Performance", self.styles['SubHeader']))
             
             disk_data = [['Metric', 'Value', 'Status']]
             
@@ -1358,7 +1358,7 @@ class PDFReportGenerator:
         # SQL Server Analysis
         if 'sql_server_analysis' in perfmon_data:
             sql = perfmon_data['sql_server_analysis']
-            story.append(Paragraph("🗃️ SQL Server Performance", self.styles['CustomSubheader']))
+            story.append(Paragraph("🗃️ SQL Server Performance", self.styles['SubHeader']))
             
             sql_data = [['Metric', 'Value', 'Status']]
             
@@ -1396,25 +1396,25 @@ class PDFReportGenerator:
         
         # Recommendations
         if 'recommendations' in perfmon_data and perfmon_data['recommendations']:
-            story.append(Paragraph("💡 Performance Recommendations", self.styles['CustomSubheader']))
+            story.append(Paragraph("💡 Performance Recommendations", self.styles['SubHeader']))
             
             for i, recommendation in enumerate(perfmon_data['recommendations'][:10], 1):  # Limit to 10
-                story.append(Paragraph(f"{i}. {recommendation}", self.styles['CustomBody']))
+                story.append(Paragraph(f"{i}. {recommendation}", self.styles['NormalText']))
             
             story.append(Spacer(1, 0.05*inch))
         
         # AI Analysis Section for PerfMon
         if 'ai_analysis' in perfmon_data:
-            story.append(Paragraph("🤖 AI Performance Analysis", self.styles['CustomSubheader']))
+            story.append(Paragraph("🤖 AI Performance Analysis", self.styles['SubHeader']))
             ai_data = perfmon_data['ai_analysis']
             
             if 'summary' in ai_data:
-                story.append(Paragraph(f"📋 {ai_data['summary']}", self.styles['CustomBody']))
+                story.append(Paragraph(f"📋 {ai_data['summary']}", self.styles['NormalText']))
                 story.append(Spacer(1, 0.03*inch))
             
             # AI Bottlenecks
             if 'bottlenecks' in ai_data and ai_data['bottlenecks']:
-                story.append(Paragraph("🎯 AI-Identified Bottlenecks", self.styles['CustomBodySmall']))
+                story.append(Paragraph("🎯 AI-Identified Bottlenecks", self.styles['NormalText']))
                 
                 ai_bottleneck_data = [['Component', 'Severity', 'Root Cause', 'Recommendation']]
                 
@@ -1452,8 +1452,8 @@ class PDFReportGenerator:
             
             # Correlation Analysis
             if 'correlation_analysis' in ai_data:
-                story.append(Paragraph("🔗 Cross-Component Analysis", self.styles['CustomBodySmall']))
-                story.append(Paragraph(ai_data['correlation_analysis'], self.styles['CustomBody']))
+                story.append(Paragraph("🔗 Cross-Component Analysis", self.styles['NormalText']))
+                story.append(Paragraph(ai_data['correlation_analysis'], self.styles['NormalText']))
                 story.append(Spacer(1, 0.05*inch))
         
         return story

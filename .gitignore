@@ -56,6 +56,14 @@ test_reports/
 *.db
 *.sqlite3
 
+# Performance Monitor Data
+src/perfmon/data/
+src/perfmon/templates/*.xml
+src/perfmon/templates/*.json
+
+# Old perfmon folder (if exists)
+perfmon/
+
 # OS
 .DS_Store
 .DS_Store?

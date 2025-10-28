@@ -59,23 +59,35 @@ class PerformanceCounterAnalyzer:
         }
     
     def analyze_performance_log(self, log_file: str) -> Dict[str, Any]:
-        """Analyze performance counter log file (.blg)
+        """Analyze performance counter log file (.blg or .json)
         
         Args:
-            log_file: Path to .blg performance log file
+            log_file: Path to .blg or .json performance log file
             
         Returns:
             Dictionary containing analysis results
         """
         try:
-            # First extract data from .blg file to CSV for easier processing
-            csv_file = self._extract_log_to_csv(log_file)
+            # Check file extension to determine processing method
+            log_path = Path(log_file)
             
-            if not csv_file:
-                return {'error': 'Failed to extract performance data'}
-            
-            # Parse CSV data
-            performance_data = self._parse_csv_data(csv_file)
+            if log_path.suffix.lower() == '.json':
+                # Parse JSON data directly
+                performance_data = self._parse_json_data(log_file)
+            elif log_path.suffix.lower() == '.blg':
+                # First extract data from .blg file to CSV for easier processing
+                csv_file = self._extract_log_to_csv(log_file)
+                
+                if not csv_file:
+                    return {'error': 'Failed to extract performance data'}
+                
+                # Parse CSV data
+                performance_data = self._parse_csv_data(csv_file)
+                
+                # Cleanup temporary CSV file
+                Path(csv_file).unlink(missing_ok=True)
+            else:
+                return {'error': f'Unsupported file format: {log_path.suffix}'}
             
             if not performance_data:
                 return {'error': 'Failed to parse performance data'}
@@ -92,9 +104,6 @@ class PerformanceCounterAnalyzer:
                 'recommendations': self._generate_recommendations(performance_data),
                 'raw_data_samples': self._get_data_samples(performance_data, 10)  # Last 10 samples
             }
-            
-            # Cleanup temporary CSV file
-            Path(csv_file).unlink(missing_ok=True)
             
             return analysis_results
             
@@ -166,6 +175,110 @@ class PerformanceCounterAnalyzer:
         except Exception as e:
             self.logger.error(f"Error extracting log to CSV: {e}")
             return None
+    
+    def _parse_json_data(self, json_file: str) -> Dict[str, List[Tuple[datetime, float]]]:
+        """Parse JSON performance data from PowerShell Get-Counter"""
+        try:
+            performance_data = {}
+            
+            # Read with utf-8-sig to handle BOM
+            with open(json_file, 'r', encoding='utf-8-sig') as f:
+                content = f.read().strip()
+            
+            # Handle incomplete JSON (might happen if process was terminated early)
+            if not content.endswith(']'):
+                content += ']'
+            
+            data = json.loads(content)
+            
+            self.logger.info(f"Raw JSON data has {len(data)} sample sets")
+            
+            # PowerShell Get-Counter JSON structure:
+            # [
+            #   {
+            #     "Timestamp": "2025-10-28T14:09:59.8469394+01:00",
+            #     "CounterSamples": [
+            #       {
+            #         "Path": "\\\\Computer\\Processor(_Total)\\% Processor Time",
+            #         "InstanceName": "_Total",
+            #         "CookedValue": 12.345
+            #       },
+            #       ...
+            #     ]
+            #   },
+            #   ...
+            # ]
+            
+            for sample_set in data:
+                if not isinstance(sample_set, dict) or 'Timestamp' not in sample_set or 'CounterSamples' not in sample_set:
+                    self.logger.debug(f"Skipping invalid sample set: {sample_set}")
+                    continue
+                
+                try:
+                    # Parse timestamp - handle ISO format with timezone
+                    timestamp_str = sample_set['Timestamp']
+                    # Remove timezone info for simpler parsing (Python datetime handling)
+                    if '+' in timestamp_str:
+                        timestamp_str = timestamp_str.split('+')[0]
+                    elif 'Z' in timestamp_str:
+                        timestamp_str = timestamp_str.replace('Z', '')
+                    
+                    # Parse the timestamp - handle microseconds that might be too long
+                    if '.' in timestamp_str:
+                        date_part, microsec_part = timestamp_str.split('.')
+                        # Truncate microseconds to 6 digits if longer
+                        if len(microsec_part) > 6:
+                            microsec_part = microsec_part[:6]
+                        timestamp_str = f"{date_part}.{microsec_part}"
+                        timestamp = datetime.strptime(timestamp_str, '%Y-%m-%dT%H:%M:%S.%f')
+                    else:
+                        timestamp = datetime.strptime(timestamp_str, '%Y-%m-%dT%H:%M:%S')
+                    
+                    # Process counter samples
+                    for counter_sample in sample_set['CounterSamples']:
+                        if not isinstance(counter_sample, dict):
+                            continue
+                        
+                        path = counter_sample.get('Path', '')
+                        cooked_value = counter_sample.get('CookedValue')
+                        
+                        self.logger.debug(f"Processing counter: Path='{path}', Value={cooked_value}")
+                        
+                        if path and cooked_value is not None:
+                            # Clean up the counter path for consistency
+                            clean_path = path.replace('\\\\', '\\').strip('\\')
+                            
+                            self.logger.debug(f"Clean path: '{clean_path}'")
+                            
+                            if clean_path not in performance_data:
+                                performance_data[clean_path] = []
+                            
+                            try:
+                                value = float(cooked_value)
+                                performance_data[clean_path].append((timestamp, value))
+                                self.logger.debug(f"Added sample for {clean_path}: {value}")
+                            except (ValueError, TypeError) as e:
+                                # Skip invalid values
+                                self.logger.debug(f"Skipping invalid value for {clean_path}: {cooked_value} - {e}")
+                                pass
+                        else:
+                            self.logger.debug(f"Skipping counter - missing path or value: Path='{path}', Value={cooked_value}")
+                
+                except Exception as e:
+                    self.logger.debug(f"Error parsing sample set: {e}")
+                    continue
+            
+            self.logger.info(f"Parsed JSON data: {len(performance_data)} counters, total samples: {sum(len(data) for data in performance_data.values())}")
+            
+            # Debug: print first few samples for each counter
+            for counter_name, samples in list(performance_data.items())[:3]:
+                self.logger.info(f"Counter '{counter_name}': {len(samples)} samples, first value: {samples[0][1] if samples else 'N/A'}")
+            
+            return performance_data
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing JSON data: {e}")
+            return {}
     
     def _parse_csv_data(self, csv_file: str) -> Dict[str, List[Tuple[datetime, float]]]:
         """Parse CSV performance data"""

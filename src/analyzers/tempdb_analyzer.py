@@ -6,6 +6,7 @@ Based on best practices from Microsoft and SQL Server experts
 
 import logging
 from typing import Dict, Any, List, Optional
+from src.core.sql_version_manager import SQLVersionManager
 
 class TempDBAnalyzer:
     """Analyzes TempDB configuration and performance"""
@@ -20,6 +21,7 @@ class TempDBAnalyzer:
         self.connection = connection
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.version_manager = SQLVersionManager(connection)
     
     def analyze(self) -> Dict[str, Any]:
         """Run complete TempDB analysis
@@ -149,7 +151,7 @@ class TempDBAnalyzer:
                 'contention_waits': contention_waits,
                 'session_waits': session_waits,
                 'contention_level': contention_level,
-                'analysis_timestamp': self.connection.execute_query("SELECT GETDATE() AS current_time")
+                'analysis_timestamp': self.connection.execute_query(self.version_manager.get_compatible_time_query())
             }
             
         except Exception as e:
@@ -231,10 +233,10 @@ class TempDBAnalyzer:
             
             if current_usage and len(current_usage) > 0:
                 usage = current_usage[0]
-                version_store_mb = usage.get('version_store_mb', 0)
-                total_used_mb = (usage.get('user_object_mb', 0) + 
-                               usage.get('internal_object_mb', 0) + 
-                               version_store_mb)
+                version_store_mb = usage.get('version_store_mb', 0) or 0
+                user_object_mb = usage.get('user_object_mb', 0) or 0
+                internal_object_mb = usage.get('internal_object_mb', 0) or 0
+                total_used_mb = user_object_mb + internal_object_mb + version_store_mb
                 
                 if version_store_mb > 1000:  # More than 1GB in version store
                     analysis['issues'].append({

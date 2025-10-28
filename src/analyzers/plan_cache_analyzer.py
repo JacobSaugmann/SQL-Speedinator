@@ -6,6 +6,7 @@ Inspired by the great ones and SQL Server community best practices
 
 import logging
 from typing import Dict, Any, List, Optional
+from src.core.sql_version_manager import SQLVersionManager
 
 class PlanCacheAnalyzer:
     """Analyzes SQL Server plan cache for performance bottlenecks"""
@@ -20,6 +21,7 @@ class PlanCacheAnalyzer:
         self.connection = connection
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.version_manager = SQLVersionManager(connection)
     
     def analyze(self) -> Dict[str, Any]:
         """Run complete plan cache analysis
@@ -63,107 +65,53 @@ class PlanCacheAnalyzer:
     
     def _get_expensive_queries(self) -> Optional[List[Dict[str, Any]]]:
         """Get most expensive queries by various metrics"""
-        query = """
-        SELECT TOP 20
-            qs.sql_handle,
-            qs.plan_handle,
-            qs.total_worker_time,
-            qs.total_elapsed_time,
-            qs.total_logical_reads,
-            qs.total_logical_writes,
-            qs.total_physical_reads,
-            qs.execution_count,
-            qs.total_worker_time / qs.execution_count AS avg_cpu_time,
-            qs.total_elapsed_time / qs.execution_count AS avg_elapsed_time,
-            qs.total_logical_reads / qs.execution_count AS avg_logical_reads,
-            qs.creation_time,
-            qs.last_execution_time,
-            SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
-                CASE 
-                    WHEN qs.statement_end_offset = -1 THEN LEN(CONVERT(nvarchar(max), st.text)) * 2 
-                    ELSE qs.statement_end_offset 
-                END - qs.statement_start_offset)/2 AS query_text,
-            qp.query_plan
-        FROM sys.dm_exec_query_stats qs
-        CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-        CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
-        WHERE qs.last_execution_time > DATEADD(HOUR, -""" + str(self.config.plan_cache_analysis_hours) + """, GETDATE())
-        ORDER BY qs.total_worker_time DESC
-        """
-        
+        # Use version-compatible query
+        query = self.version_manager.get_compatible_query_stats_query()
         return self.connection.execute_query(query)
     
     def _get_frequently_executed_queries(self) -> Optional[List[Dict[str, Any]]]:
         """Get most frequently executed queries"""
+        # Use simplified version-compatible query
+        query = self.version_manager.get_compatible_query_stats_query().replace(
+            "ORDER BY qs.total_worker_time DESC", 
+            "ORDER BY qs.execution_count DESC"
+        )
+        return self.connection.execute_query(query)
+    
+    def _get_poor_performing_queries(self) -> Optional[List[Dict[str, Any]]]:
+        """Get queries with poor performance characteristics"""
+        # Use simple version to avoid SUBSTRING issues
         query = """
         SELECT TOP 20
-            qs.sql_handle,
-            qs.plan_handle,
             qs.execution_count,
             qs.total_worker_time,
             qs.total_elapsed_time,
             qs.total_logical_reads,
+            qs.total_physical_reads,
             qs.total_worker_time / qs.execution_count AS avg_cpu_time,
             qs.total_elapsed_time / qs.execution_count AS avg_elapsed_time,
             qs.total_logical_reads / qs.execution_count AS avg_logical_reads,
             qs.creation_time,
             qs.last_execution_time,
-            SUBSTRING(st.text, (qs.statement_start_offset/2)+1, 
-                CASE 
-                    WHEN qs.statement_end_offset = -1 THEN LEN(CONVERT(nvarchar(max), st.text)) * 2 
-                    ELSE qs.statement_end_offset 
-                END - qs.statement_start_offset)/2 AS query_text
+            LEFT(st.text, 100) AS query_text_sample,
+            CASE
+                WHEN qs.total_physical_reads / qs.execution_count > 1000 THEN 'HIGH_PHYSICAL_READS'
+                WHEN qs.total_logical_reads / qs.execution_count > 10000 THEN 'HIGH_LOGICAL_READS'
+                WHEN qs.total_worker_time / qs.execution_count > 5000000 THEN 'HIGH_CPU'
+                WHEN qs.total_elapsed_time / qs.execution_count > 10000000 THEN 'HIGH_DURATION'
+                ELSE 'OTHER'
+            END AS performance_issue
         FROM sys.dm_exec_query_stats qs
         CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
-        WHERE qs.last_execution_time > DATEADD(HOUR, -""" + str(self.config.plan_cache_analysis_hours) + """, GETDATE())
-        ORDER BY qs.execution_count DESC
-        """
-        
-        return self.connection.execute_query(query)
-    
-    def _get_poor_performing_queries(self) -> Optional[List[Dict[str, Any]]]:
-        """Get queries with poor performance characteristics"""
-        query = """
-        WITH PoorPerformers AS (
-            SELECT 
-                qs.sql_handle,
-                qs.plan_handle,
-                qs.execution_count,
-                qs.total_worker_time,
-                qs.total_elapsed_time,
-                qs.total_logical_reads,
-                qs.total_logical_writes,
-                qs.total_physical_reads,
-                qs.total_worker_time / qs.execution_count AS avg_cpu_time,
-                qs.total_elapsed_time / qs.execution_count AS avg_elapsed_time,
-                qs.total_logical_reads / qs.execution_count AS avg_logical_reads,
-                qs.total_physical_reads / qs.execution_count AS avg_physical_reads,
-                qs.creation_time,
-                qs.last_execution_time,
-                CASE 
-                    WHEN qs.total_physical_reads / qs.execution_count > 1000 THEN 'HIGH_PHYSICAL_READS'
-                    WHEN qs.total_logical_reads / qs.execution_count > 10000 THEN 'HIGH_LOGICAL_READS'
-                    WHEN qs.total_worker_time / qs.execution_count > 5000000 THEN 'HIGH_CPU'  -- 5 seconds
-                    WHEN qs.total_elapsed_time / qs.execution_count > 10000000 THEN 'HIGH_DURATION'  -- 10 seconds
-                    ELSE 'OTHER'
-                END AS performance_issue
-            FROM sys.dm_exec_query_stats qs
-            WHERE qs.last_execution_time > DATEADD(HOUR, -""" + str(self.config.plan_cache_analysis_hours) + """, GETDATE())
-            AND (
-                qs.total_physical_reads / qs.execution_count > 1000 OR
-                qs.total_logical_reads / qs.execution_count > 10000 OR
-                qs.total_worker_time / qs.execution_count > 5000000 OR
-                qs.total_elapsed_time / qs.execution_count > 10000000
-            )
+        WHERE qs.last_execution_time > DATEADD(HOUR, -24, GETDATE())
+        AND (
+            qs.total_physical_reads / qs.execution_count > 1000 OR
+            qs.total_logical_reads / qs.execution_count > 10000 OR
+            qs.total_worker_time / qs.execution_count > 5000000 OR
+            qs.total_elapsed_time / qs.execution_count > 10000000
         )
-        SELECT TOP 20
-            pp.*,
-            SUBSTRING(st.text, (pp.sql_handle), 500) AS query_text_sample
-        FROM PoorPerformers pp
-        CROSS APPLY sys.dm_exec_sql_text(pp.sql_handle) st
-        ORDER BY pp.avg_cpu_time DESC
+        ORDER BY qs.total_worker_time DESC
         """
-        
         return self.connection.execute_query(query)
     
     def _analyze_plan_reuse(self) -> Dict[str, Any]:
@@ -250,17 +198,8 @@ class PlanCacheAnalyzer:
             
             memory_clerks = self.connection.execute_query(memory_query)
             
-            # Get plan cache eviction information
-            eviction_query = """
-            SELECT 
-                name,
-                counter_name,
-                cntr_value
-            FROM sys.dm_os_performance_counters
-            WHERE object_name LIKE '%Plan Cache%'
-            AND counter_name IN ('Cache Hit Ratio', 'Cache Object Counts', 'Cache Objects in use')
-            """
-            
+            # Get plan cache eviction information - use version compatible query
+            eviction_query = self.version_manager.get_compatible_performance_counters_query()
             eviction_stats = self.connection.execute_query(eviction_query)
             
             # Check for memory pressure indicators

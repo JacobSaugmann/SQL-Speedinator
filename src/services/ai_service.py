@@ -5,6 +5,7 @@ Provides AI-powered analysis and recommendations using Azure OpenAI GPT models
 
 import logging
 import json
+import re
 from typing import Dict, Any, Optional
 from openai import AzureOpenAI
 try:
@@ -27,35 +28,84 @@ class AIService:
         
         if config.be_my_copilot:
             if not config.validate_ai_config():
-                raise ValueError("Invalid AI configuration. Check required Azure OpenAI settings.")
+                self.logger.warning("Invalid AI configuration. Disabling AI analysis.")
+                self.client = None
+                return
             
             try:
-                # Initialize without proxy settings to avoid compatibility issues
+                # Import here to catch any import errors
+                import httpx
+                
+                # Clear all proxy-related environment variables
                 import os
-                # Temporarily clear proxy environment variables if they exist
-                proxy_env_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']
-                original_proxy_values = {}
-                for var in proxy_env_vars:
+                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'REQUESTS_CA_BUNDLE']
+                saved_vars = {}
+                for var in proxy_vars:
                     if var in os.environ:
-                        original_proxy_values[var] = os.environ[var]
+                        saved_vars[var] = os.environ[var]
                         del os.environ[var]
                 
                 try:
+                    # Try basic initialization first
                     self.client = AzureOpenAI(
                         api_key=config.azure_openai_api_key,
                         api_version=config.azure_openai_api_version,
                         azure_endpoint=config.azure_openai_endpoint
                     )
-                    self.logger.info("Azure OpenAI client initialized successfully")
-                finally:
-                    # Restore proxy environment variables
-                    for var, value in original_proxy_values.items():
-                        os.environ[var] = value
-                        
+                    self.logger.info("Azure OpenAI client initialized")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Basic initialization failed ({str(e)}), trying with custom HTTP client...")
+                    
+                    # Create custom HTTP client without proxy settings
+                    custom_client = httpx.Client(
+                        timeout=httpx.Timeout(60.0),
+                        limits=httpx.Limits(max_keepalive_connections=10, max_connections=50)
+                    )
+                    
+                    # Initialize with custom client
+                    self.client = AzureOpenAI(
+                        api_key=config.azure_openai_api_key,
+                        api_version=config.azure_openai_api_version,
+                        azure_endpoint=config.azure_openai_endpoint,
+                        http_client=custom_client
+                    )
+                    self.logger.info("Azure OpenAI client initialized with custom HTTP client")
+                
+                # Restore environment variables
+                for var, value in saved_vars.items():
+                    os.environ[var] = value
+                    
             except Exception as e:
-                self.logger.error(f"Failed to initialize Azure OpenAI client: {e}")
-                self.logger.warning("Continuing without AI analysis...")
+                self.logger.error(f"Failed to initialize Azure OpenAI client: {str(e)}")
                 self.client = None
+    
+    def _clean_html_tags(self, text: str) -> str:
+        """Clean malformed HTML tags like '>green>' from AI responses"""
+        if not isinstance(text, str):
+            return text
+            
+        # Fix malformed tags like '>green>', '>red>', '>orange>'
+        text = re.sub(r'>green>', '<font color="green">OK</font>', text)
+        text = re.sub(r'>red>', '<font color="red">CRITICAL</font>', text) 
+        text = re.sub(r'>orange>', '<font color="orange">WARNING</font>', text)
+        text = re.sub(r'>yellow>', '<font color="orange">CAUTION</font>', text)
+        
+        # Remove any other malformed > tags
+        text = re.sub(r'>(\w+)>', r'\1', text)
+        
+        return text
+    
+    def _clean_dict_recursively(self, obj):
+        """Recursively clean HTML tags in dictionary/list structures"""
+        if isinstance(obj, dict):
+            return {k: self._clean_dict_recursively(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_dict_recursively(item) for item in obj]
+        elif isinstance(obj, str):
+            return self._clean_html_tags(obj)
+        else:
+            return obj
     
     def is_enabled(self) -> bool:
         """Check if AI service is enabled and configured"""
@@ -102,6 +152,9 @@ class AIService:
             
             # Parse and structure the response
             analysis_result = json.loads(ai_response)
+            
+            # Clean malformed HTML tags in the analysis result
+            analysis_result = self._clean_dict_recursively(analysis_result)
             
             return {
                 'ai_enabled': True,
@@ -244,14 +297,17 @@ class AIService:
             # Try to parse as JSON, fallback to text if needed
             try:
                 ai_analysis = json.loads(ai_content)
+                # Clean malformed HTML tags in the analysis result
+                ai_analysis = self._clean_dict_recursively(ai_analysis)
             except json.JSONDecodeError:
                 # If JSON parsing fails, create structured response from text
+                cleaned_content = self._clean_html_tags(ai_content)
                 ai_analysis = {
                     "analysis_type": "perfmon_bottlenecks",
-                    "raw_response": ai_content,
+                    "raw_response": cleaned_content,
                     "summary": "AI analysis completed - see raw response for details",
                     "bottlenecks": [],
-                    "recommendations": ai_content.split('\n') if '\n' in ai_content else [ai_content]
+                    "recommendations": cleaned_content.split('\n') if '\n' in cleaned_content else [cleaned_content]
                 }
             
             ai_analysis["analysis_type"] = "perfmon_bottlenecks"

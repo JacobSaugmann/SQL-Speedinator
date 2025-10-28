@@ -186,11 +186,11 @@ class PerfMonTemplateManager:
         
         return xml_template
     
-    def start_data_collection(self, dcs_file: str, duration_hours: int = 4) -> Dict[str, Any]:
-        """Start PerfMon data collection
+    def start_data_collection(self, dcs_file: str, duration_hours: float = 4.0) -> Dict[str, Any]:
+        """Start PerfMon data collection using PowerShell Get-Counter
         
         Args:
-            dcs_file: Path to data collector set XML file
+            dcs_file: Path to data collector set XML file (used for naming)
             duration_hours: How long to collect data (default 4 hours)
             
         Returns:
@@ -199,66 +199,282 @@ class PerfMonTemplateManager:
         try:
             dcs_name = Path(dcs_file).stem
             
-            # Import the data collector set
-            import_cmd = f'logman import -n "{dcs_name}" -xml "{dcs_file}"'
-            result = subprocess.run(import_cmd, shell=True, capture_output=True, text=True)
+            # Create output directory
+            output_dir = self.data_dir / datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_dir.mkdir(exist_ok=True, parents=True)
             
-            if result.returncode != 0:
-                self.logger.error(f"Failed to import data collector set: {result.stderr}")
-                return {'success': False, 'error': result.stderr}
+            # Define essential counters for SQL Server performance monitoring
+            counters = [
+                "\\Processor(_Total)\\% Processor Time",
+                "\\System\\Processor Queue Length", 
+                "\\Memory\\Available MBytes",
+                "\\Memory\\Pages/sec",
+                "\\LogicalDisk(*)\\% Idle Time",
+                "\\LogicalDisk(*)\\Avg. Disk Queue Length",
+                "\\LogicalDisk(*)\\Avg. Disk sec/Read",
+                "\\LogicalDisk(*)\\Avg. Disk sec/Write"
+            ]
             
-            # Start the data collection
-            start_cmd = f'logman start "{dcs_name}"'
-            result = subprocess.run(start_cmd, shell=True, capture_output=True, text=True)
+            # Output file path
+            output_file = output_dir / f"{dcs_name}.json"
             
-            if result.returncode != 0:
-                self.logger.error(f"Failed to start data collection: {result.stderr}")
-                return {'success': False, 'error': result.stderr}
+            # Calculate how many samples to collect (1 per second)
+            duration_seconds = int(duration_hours * 3600)
+            max_samples = duration_seconds  # Collect for the exact duration specified
             
-            # Calculate end time
-            start_time = datetime.now()
-            end_time = start_time + timedelta(hours=duration_hours)
+            # Create PowerShell script that uses WMI (fallback for systems with disabled perfmon)
+            ps_script = f'''
+            $outputFile = "{output_file}"
             
+            # Initialize JSON array
+            Write-Output "[" | Out-File -FilePath $outputFile -Encoding UTF8 -NoNewline
+            
+            $samples = 0
+            $maxSamples = {max_samples}
+            
+            while ($samples -lt $maxSamples) {{
+                try {{
+                    # Get performance data using WMI
+                    $timestamp = Get-Date
+                    $cpu = Get-WmiObject -Class Win32_Processor | Measure-Object -Property LoadPercentage -Average -ErrorAction SilentlyContinue
+                    $memory = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction SilentlyContinue
+                    $processes = Get-WmiObject -Class Win32_Process -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count
+                    
+                    # Get disk performance data
+                    $disks = Get-WmiObject -Class Win32_LogicalDisk -Filter "DriveType=3" -ErrorAction SilentlyContinue
+                    $diskPerf = Get-WmiObject -Class Win32_PerfRawData_PerfDisk_LogicalDisk -ErrorAction SilentlyContinue
+                    
+                    if ($memory) {{
+                        $availableMemoryMB = [math]::Round($memory.FreePhysicalMemory / 1024, 2)
+                        $totalMemoryMB = [math]::Round($memory.TotalVisibleMemorySize / 1024, 2)
+                        $usedMemoryPercent = [math]::Round((($totalMemoryMB - $availableMemoryMB) / $totalMemoryMB) * 100, 2)
+                    }} else {{
+                        $availableMemoryMB = 0
+                        $usedMemoryPercent = 0
+                    }}
+                    
+                    $cpuPercent = if ($cpu -and $cpu.Average) {{ $cpu.Average }} else {{ 0 }}
+                    
+                    # Initialize counter samples array
+                    $counterSamples = @(
+                        @{{
+                            Path = "\\Computer\\Processor(_Total)\\% Processor Time"
+                            InstanceName = "_Total"
+                            CookedValue = $cpuPercent
+                        }},
+                        @{{
+                            Path = "\\Computer\\Memory\\Available MBytes"
+                            InstanceName = ""
+                            CookedValue = $availableMemoryMB
+                        }},
+                        @{{
+                            Path = "\\Computer\\Memory\\% Memory Used"
+                            InstanceName = ""
+                            CookedValue = $usedMemoryPercent
+                        }},
+                        @{{
+                            Path = "\\Computer\\System\\Process Count"
+                            InstanceName = ""
+                            CookedValue = $processes
+                        }}
+                    )
+                    
+                    # Add disk performance counters
+                    if ($disks) {{
+                        foreach ($disk in $disks) {{
+                            $driveLetter = $disk.DeviceID
+                            $freeSpaceGB = [math]::Round($disk.FreeSpace / 1GB, 2)
+                            $totalSpaceGB = [math]::Round($disk.Size / 1GB, 2)
+                            $usedSpacePercent = if ($totalSpaceGB -gt 0) {{ [math]::Round((($totalSpaceGB - $freeSpaceGB) / $totalSpaceGB) * 100, 2) }} else {{ 0 }}
+                            
+                            $counterSamples += @(
+                                @{{
+                                    Path = "\\Computer\\LogicalDisk($driveLetter)\\Free Megabytes"
+                                    InstanceName = $driveLetter
+                                    CookedValue = $freeSpaceGB * 1024
+                                }},
+                                @{{
+                                    Path = "\\Computer\\LogicalDisk($driveLetter)\\% Disk Space Used"
+                                    InstanceName = $driveLetter
+                                    CookedValue = $usedSpacePercent
+                                }}
+                            )
+                        }}
+                    }}
+                    
+                    # Add disk performance metrics from performance counters if available
+                    if ($diskPerf) {{
+                        foreach ($perf in $diskPerf) {{
+                            if ($perf.Name -ne "_Total" -and $perf.Name -match "^[A-Z]:$") {{
+                                $diskQueueLength = if ($perf.CurrentDiskQueueLength) {{ $perf.CurrentDiskQueueLength }} else {{ 0 }}
+                                
+                                # Convert raw performance counter values to meaningful metrics
+                                # These are cumulative counters, so we need to calculate rates or use current values
+                                $diskReadTime = if ($perf.AvgDiskSecPerRead -and $perf.AvgDiskSecPerRead_Base -and $perf.AvgDiskSecPerRead_Base -gt 0) {{ 
+                                    # Convert from 100ns units to milliseconds
+                                    [math]::Round(($perf.AvgDiskSecPerRead / $perf.AvgDiskSecPerRead_Base) * 100 / 1000000, 3) 
+                                }} else {{ 0 }}
+                                $diskWriteTime = if ($perf.AvgDiskSecPerWrite -and $perf.AvgDiskSecPerWrite_Base -and $perf.AvgDiskSecPerWrite_Base -gt 0) {{ 
+                                    # Convert from 100ns units to milliseconds  
+                                    [math]::Round(($perf.AvgDiskSecPerWrite / $perf.AvgDiskSecPerWrite_Base) * 100 / 1000000, 3) 
+                                }} else {{ 0 }}
+                                
+                                # Use disk busy time as percentage
+                                $diskBusyPercent = if ($perf.PercentDiskTime -and $perf.PercentDiskTime_Base -and $perf.PercentDiskTime_Base -gt 0) {{
+                                    [math]::Round(($perf.PercentDiskTime / $perf.PercentDiskTime_Base) * 100, 2)
+                                }} else {{ 0 }}
+                                
+                                $counterSamples += @(
+                                    @{{
+                                        Path = "\\Computer\\LogicalDisk($($perf.Name))\\Current Disk Queue Length"
+                                        InstanceName = $perf.Name
+                                        CookedValue = $diskQueueLength
+                                    }},
+                                    @{{
+                                        Path = "\\Computer\\LogicalDisk($($perf.Name))\\Avg. Disk sec/Read"
+                                        InstanceName = $perf.Name
+                                        CookedValue = $diskReadTime
+                                    }},
+                                    @{{
+                                        Path = "\\Computer\\LogicalDisk($($perf.Name))\\Avg. Disk sec/Write"
+                                        InstanceName = $perf.Name
+                                        CookedValue = $diskWriteTime
+                                    }},
+                                    @{{
+                                        Path = "\\Computer\\LogicalDisk($($perf.Name))\\% Disk Time"
+                                        InstanceName = $perf.Name
+                                        CookedValue = $diskBusyPercent
+                                    }}
+                                )
+                            }}
+                        }}
+                    }}
+                    
+                    $sampleData = @{{
+                        Timestamp = $timestamp.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK")
+                        CounterSamples = $counterSamples
+                    }}
+                    
+                    $json = $sampleData | ConvertTo-Json -Depth 3 -Compress
+                    if ($samples -gt 0) {{
+                        Write-Output "," | Out-File -FilePath $outputFile -Append -Encoding UTF8 -NoNewline
+                    }}
+                    Write-Output $json | Out-File -FilePath $outputFile -Append -Encoding UTF8 -NoNewline
+                    
+                    $samples++
+                    Start-Sleep -Seconds 1
+                }} catch {{
+                    # On error, create a minimal sample with timestamp
+                    $timestamp = Get-Date
+                    $sampleData = @{{
+                        Timestamp = $timestamp.ToString("yyyy-MM-ddTHH:mm:ss.fffffffK")
+                        CounterSamples = @(
+                            @{{
+                                Path = "\\Computer\\System\\Error"
+                                InstanceName = ""
+                                CookedValue = 1
+                            }}
+                        )
+                    }}
+                    
+                    $json = $sampleData | ConvertTo-Json -Depth 3 -Compress
+                    if ($samples -gt 0) {{
+                        Write-Output "," | Out-File -FilePath $outputFile -Append -Encoding UTF8 -NoNewline
+                    }}
+                    Write-Output $json | Out-File -FilePath $outputFile -Append -Encoding UTF8 -NoNewline
+                    
+                    $samples++
+                    Start-Sleep -Seconds 1
+                }}
+            }}
+            
+            # Close JSON array
+            Write-Output "]" | Out-File -FilePath $outputFile -Append -Encoding UTF8
+            '''
+            
+            # Save PowerShell script
+            ps_script_file = output_dir / "collect.ps1"
+            with open(ps_script_file, 'w', encoding='utf-8') as f:
+                f.write(ps_script)
+            
+            self.logger.info(f"Starting PowerShell data collection for {duration_hours} hours")
+            self.logger.info(f"Output file: {output_file}")
+            
+            # Start PowerShell script in background
+            powershell_cmd = [
+                'powershell.exe',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', str(ps_script_file)
+            ]
+            
+            process = subprocess.Popen(
+                powershell_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=False
+            )
+            
+            # Store process info for stopping later
             collection_info = {
                 'success': True,
                 'dcs_name': dcs_name,
-                'start_time': start_time.isoformat(),
-                'end_time': end_time.isoformat(),
+                'start_time': datetime.now().isoformat(),
+                'end_time': (datetime.now() + timedelta(hours=duration_hours)).isoformat(),
                 'duration_hours': duration_hours,
-                'status': 'running'
+                'status': 'running',
+                'output_file': str(output_file),
+                'process': process,
+                'pid': process.pid
             }
             
-            self.logger.info(f"Started data collection: {dcs_name} for {duration_hours} hours")
+            self.logger.info(f"Started PowerShell data collection (PID: {process.pid})")
             return collection_info
             
         except Exception as e:
             self.logger.error(f"Error starting data collection: {e}")
             return {'success': False, 'error': str(e)}
     
-    def stop_data_collection(self, dcs_name: str) -> bool:
+    def stop_data_collection(self, collection_info: Dict[str, Any]) -> bool:
         """Stop PerfMon data collection
         
         Args:
-            dcs_name: Name of data collector set to stop
+            collection_info: Collection information from start_data_collection
             
         Returns:
             True if successful, False otherwise
         """
         try:
-            # Stop the data collection
-            stop_cmd = f'logman stop "{dcs_name}"'
-            result = subprocess.run(stop_cmd, shell=True, capture_output=True, text=True)
+            if isinstance(collection_info, str):
+                # Old API compatibility - collection_info is just the name
+                dcs_name = collection_info
+                # Try to stop with logman (old method)
+                stop_cmd = ['logman', 'stop', dcs_name]
+                result = subprocess.run(stop_cmd, capture_output=True, text=True)
+                return result.returncode == 0
             
-            if result.returncode != 0:
-                self.logger.warning(f"Error stopping data collection: {result.stderr}")
+            # New API - collection_info is a dictionary
+            process = collection_info.get('process')
+            dcs_name = collection_info.get('dcs_name', 'Unknown')
+            
+            if process and hasattr(process, 'terminate'):
+                try:
+                    # Terminate the typeperf process
+                    process.terminate()
+                    process.wait(timeout=5)  # Wait up to 5 seconds
+                    self.logger.info(f"Stopped data collection: {dcs_name}")
+                    return True
+                except subprocess.TimeoutExpired:
+                    # Force kill if terminate doesn't work
+                    process.kill()
+                    process.wait()
+                    self.logger.warning(f"Force killed data collection process: {dcs_name}")
+                    return True
+                except Exception as e:
+                    self.logger.error(f"Error stopping process: {e}")
+                    return False
+            else:
+                self.logger.warning("No process information available to stop")
                 return False
-            
-            # Delete the data collector set
-            delete_cmd = f'logman delete "{dcs_name}"'
-            result = subprocess.run(delete_cmd, shell=True, capture_output=True, text=True)
-            
-            self.logger.info(f"Stopped and cleaned up data collection: {dcs_name}")
-            return True
             
         except Exception as e:
             self.logger.error(f"Error stopping data collection: {e}")
