@@ -16,7 +16,9 @@
 
 - **⚡ Lightning Fast Analysis**: Comprehensive SQL Server performance analysis
 - **🤖 AI-Powered Insights**: Azure OpenAI integration for intelligent bottleneck identification
-- **📊 Responsive PDF Reports**: Ultra-compact reports with automatic table adaptation
+- **📊 Performance Monitor Integration**: Windows Performance Counters with enterprise-level monitoring
+- **📈 Real-time Data Collection**: Automated PerfMon data collection and analysis
+- **📋 Responsive PDF Reports**: Ultra-compact reports with automatic table adaptation
 - **🔧 Index Optimization**: Fragmentation analysis with custom maintenance scripts
 - **🔍 Missing Index Detection**: Intelligent identification of missing indexes
 - **⚙️ Configuration Review**: Best practice checks and recommendations
@@ -31,6 +33,8 @@
 - Python 3.7+
 - SQL Server 2012+ (any edition)
 - Windows Authentication or SQL Server Authentication
+- **Windows OS** (for Performance Monitor integration)
+- Administrative privileges (for PerfMon data collection)
 
 ### Installation
 
@@ -64,20 +68,40 @@ python main.py -s your-server-name
 # With AI analysis
 python main.py -s your-server-name --ai-analysis
 
+# With Performance Monitor integration (4 hours collection)
+python main.py -s your-server-name --perfmon-duration 240
+
+# Analyze existing Performance Monitor data
+python main.py -s your-server-name --perfmon-file "C:\PerfLogs\sql_perf.blg"
+
+# Complete analysis with AI and PerfMon (2 hours)
+python main.py -s your-server-name --perfmon-duration 120 --ai-analysis
+
 # Night mode (minimal impact)
 python main.py -s your-server-name --night-mode
 ```
+
+## 📊 Performance Monitor Integration
+
+SQL Speedinator now includes enterprise-level Performance Monitor integration:
+
+- **🖥️ System Metrics**: CPU, Memory, Disk I/O monitoring
+- **🗃️ SQL Server Counters**: 100+ specialized performance counters
+- **📈 Real-time Collection**: Automated data collection with configurable duration
+- **🤖 AI Bottleneck Analysis**: Cross-component correlation and root cause analysis
+- **📋 Comprehensive Reports**: Detailed performance metrics in PDF format
 
 ## 📊 Sample Output
 
 SQL Speedinator generates comprehensive PDF reports with:
 
 - **🔍 Executive Summary**: AI-powered bottleneck identification
-- **💾 Disk Performance**: I/O metrics and performance trends  
+- **� Performance Monitor Analysis**: System and SQL Server performance metrics
+- **�💾 Disk Performance**: I/O metrics and performance trends  
 - **🔧 Index Analysis**: Fragmentation, missing, and unused indexes
 - **⚙️ Configuration Review**: Best practice recommendations
 - **📈 Query Performance**: Plan cache analysis
-- **🤖 AI Recommendations**: Prioritized action plans
+- **🤖 AI Recommendations**: Prioritized action plans with cross-component correlation
 
 ## 🏗️ Project Structure
 
@@ -86,8 +110,12 @@ sql-speedinator/
 ├── src/
 │   ├── analyzers/          # Performance analyzers
 │   ├── core/              # Core functionality  
+│   ├── perfmon/           # Performance Monitor integration
 │   ├── reports/           # Report generation
 │   └── services/          # External services (AI)
+├── perfmon/
+│   ├── templates/         # PerfMon XML templates
+│   └── data/             # Collected performance data
 ├── tests/                 # Test suite
 ├── templates/             # Report templates
 └── sql_scripts/          # SQL query scripts
