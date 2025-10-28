@@ -42,14 +42,27 @@ class IndexAnalyzer:
             Dictionary containing index analysis results
         """
         try:
+            # Collect all analysis results first
+            fragmented_indexes = self._get_fragmented_indexes()
+            unused_indexes = self._get_unused_indexes()
+            duplicate_indexes = self._find_duplicate_indexes()
+            index_usage_stats = self._get_index_usage_stats()
+            fragmentation_usage_analysis = self._get_fragmentation_usage_analysis()
+            maintenance_recommendations = self._get_index_maintenance_recommendations()
+            
+            # Generate recommendations based on collected data
+            recommendations = self._generate_index_recommendations(
+                unused_indexes, duplicate_indexes, index_usage_stats
+            )
+            
             results = {
-                'fragmented_indexes': self._get_fragmented_indexes(),
-                'unused_indexes': self._get_unused_indexes(),
-                'duplicate_indexes': self._find_duplicate_indexes(),
-                'index_usage_stats': self._get_index_usage_stats(),
-                'fragmentation_usage_analysis': self._get_fragmentation_usage_analysis(),
-                'maintenance_recommendations': self._get_index_maintenance_recommendations(),
-                'recommendations': self._generate_index_recommendations()
+                'fragmented_indexes': fragmented_indexes,
+                'unused_indexes': unused_indexes,
+                'duplicate_indexes': duplicate_indexes,
+                'index_usage_stats': index_usage_stats,
+                'fragmentation_usage_analysis': fragmentation_usage_analysis,
+                'maintenance_recommendations': maintenance_recommendations,
+                'recommendations': recommendations
             }
             
             return results
@@ -174,7 +187,29 @@ class IndexAnalyzer:
     
     def _find_duplicate_indexes(self) -> Optional[List[Dict[str, Any]]]:
         """Find potentially duplicate or overlapping indexes"""
-        query = """
+        
+        duplicate_indexes = []
+        user_databases = self._get_user_databases()
+        
+        if not user_databases:
+            self.logger.warning("No user databases found for duplicate index analysis")
+            return None
+        
+        # Save current database context (likely master)
+        original_db_query = "SELECT DB_NAME() as current_db"
+        original_db_result = self.connection.execute_query(original_db_query)
+        original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
+        
+        try:
+            for db_name in user_databases:
+                self.logger.info(f"Analyzing duplicate indexes in database: {db_name}")
+                
+                # Change to user database
+                if not self.connection.change_database(db_name):
+                    self.logger.warning(f"Could not access database {db_name}, skipping...")
+                    continue
+                
+                query = """
         WITH IndexColumns AS (
             SELECT 
                 i.object_id,
@@ -236,13 +271,45 @@ class IndexAnalyzer:
         )
         AND NOT (ic1.is_primary_key = 1 OR ic2.is_primary_key = 1)  -- Exclude primary keys
         ORDER BY OBJECT_NAME(ic1.object_id), ic1.index_name
-        """
+                """
+                
+                db_result = self.connection.execute_query(query)
+                if db_result:
+                    duplicate_indexes.extend(db_result)
+                    
+        except Exception as e:
+            self.logger.error(f"Error during duplicate index analysis: {str(e)}")
+        finally:
+            # Restore original database context
+            self.connection.change_database(original_db)
         
-        return self.connection.execute_query(query)
+        return duplicate_indexes if duplicate_indexes else None
     
     def _get_index_usage_stats(self) -> Optional[List[Dict[str, Any]]]:
         """Get comprehensive index usage statistics"""
-        query = """
+        
+        usage_stats = []
+        user_databases = self._get_user_databases()
+        
+        if not user_databases:
+            self.logger.warning("No user databases found for index usage stats analysis")
+            return None
+        
+        # Save current database context (likely master)
+        original_db_query = "SELECT DB_NAME() as current_db"
+        original_db_result = self.connection.execute_query(original_db_query)
+        original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
+        
+        try:
+            for db_name in user_databases:
+                self.logger.info(f"Analyzing index usage stats in database: {db_name}")
+                
+                # Change to user database
+                if not self.connection.change_database(db_name):
+                    self.logger.warning(f"Could not access database {db_name}, skipping...")
+                    continue
+                
+                query = """
         SELECT 
             DB_NAME() AS database_name,
             OBJECT_SCHEMA_NAME(i.object_id) AS schema_name,
@@ -273,7 +340,7 @@ class IndexAnalyzer:
                 ELSE 'LIGHTLY_USED'
             END AS usage_pattern
         FROM sys.indexes i
-        LEFT JOIN sys.dm_db_index_usage_stats us ON i.object_id = us.object_id AND i.index_id = us.index_id
+        LEFT JOIN sys.dm_db_index_usage_stats us ON i.object_id = us.object_id AND i.index_id = us.index_id AND us.database_id = DB_ID()
         INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
         INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
         WHERE i.type > 0  -- Exclude heaps
@@ -286,9 +353,19 @@ class IndexAnalyzer:
                  us.system_updates, us.last_user_seek, us.last_user_scan, 
                  us.last_user_lookup, us.last_user_update, p.rows
         ORDER BY (ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0)) DESC
-        """
+                """
+                
+                db_result = self.connection.execute_query(query)
+                if db_result:
+                    usage_stats.extend(db_result)
+                    
+        except Exception as e:
+            self.logger.error(f"Error during index usage stats analysis: {str(e)}")
+        finally:
+            # Restore original database context
+            self.connection.change_database(original_db)
         
-        return self.connection.execute_query(query)
+        return usage_stats if usage_stats else None
     
     def _get_fragmentation_usage_analysis(self) -> Optional[List[Dict[str, Any]]]:
         """Analyze index fragmentation combined with usage patterns for smart maintenance decisions
@@ -466,7 +543,7 @@ class IndexAnalyzer:
         
         return self.connection.execute_query(query)
     
-    def _generate_index_recommendations(self) -> List[Dict[str, Any]]:
+    def _generate_index_recommendations(self, unused_indexes=None, duplicate_indexes=None, index_usage_stats=None) -> List[Dict[str, Any]]:
         """Generate specific index maintenance recommendations"""
         recommendations = []
         
@@ -526,8 +603,8 @@ class IndexAnalyzer:
                     ]
                 })
         
-        # Unused indexes recommendations
-        unused = self._get_unused_indexes()
+        # Unused indexes recommendations - use provided data if available
+        unused = unused_indexes if unused_indexes is not None else self._get_unused_indexes()
         if unused:
             total_unused_size = sum(idx.get('size_mb', 0) for idx in unused)
             
@@ -543,8 +620,8 @@ class IndexAnalyzer:
                 ]
             })
         
-        # Duplicate indexes recommendations
-        duplicates = self._find_duplicate_indexes()
+        # Duplicate indexes recommendations - use provided data if available
+        duplicates = duplicate_indexes if duplicate_indexes is not None else self._find_duplicate_indexes()
         if duplicates:
             recommendations.append({
                 'priority': 'MEDIUM',
@@ -558,8 +635,8 @@ class IndexAnalyzer:
                 ]
             })
         
-        # Usage pattern recommendations
-        usage_stats = self._get_index_usage_stats()
+        # Usage pattern recommendations - use provided data if available
+        usage_stats = index_usage_stats if index_usage_stats is not None else self._get_index_usage_stats()
         if usage_stats:
             over_updated = [idx for idx in usage_stats if idx.get('usage_pattern') == 'OVER_UPDATED']
             if over_updated:
