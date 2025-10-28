@@ -51,18 +51,18 @@ class ServerConfigAnalyzer:
         SELECT 
             @@SERVERNAME as server_name,
             @@VERSION as version_info,
-            SERVERPROPERTY('ProductVersion') as product_version,
-            SERVERPROPERTY('ProductLevel') as product_level,
-            SERVERPROPERTY('Edition') as edition,
+            CAST(SERVERPROPERTY('ProductVersion') AS VARCHAR(50)) as product_version,
+            CAST(SERVERPROPERTY('ProductLevel') AS VARCHAR(50)) as product_level,
+            CAST(SERVERPROPERTY('Edition') AS VARCHAR(200)) as edition,
             SERVERPROPERTY('EngineEdition') as engine_edition,
-            SERVERPROPERTY('MachineName') as machine_name,
-            SERVERPROPERTY('InstanceName') as instance_name,
-            SERVERPROPERTY('Collation') as collation,
-            SERVERPROPERTY('IsAdvancedAnalyticsInstalled') as advanced_analytics,
-            SERVERPROPERTY('IsFullTextInstalled') as fulltext_installed,
-            SERVERPROPERTY('IsIntegratedSecurityOnly') as windows_auth_only,
-            SERVERPROPERTY('IsClustered') as is_clustered,
-            SERVERPROPERTY('IsHadrEnabled') as is_hadr_enabled,
+            CAST(SERVERPROPERTY('MachineName') AS VARCHAR(100)) as machine_name,
+            CAST(SERVERPROPERTY('InstanceName') AS VARCHAR(100)) as instance_name,
+            CAST(SERVERPROPERTY('Collation') AS VARCHAR(100)) as collation,
+            CAST(SERVERPROPERTY('IsAdvancedAnalyticsInstalled') AS BIT) as advanced_analytics,
+            CAST(SERVERPROPERTY('IsFullTextInstalled') AS BIT) as fulltext_installed,
+            CAST(SERVERPROPERTY('IsIntegratedSecurityOnly') AS BIT) as windows_auth_only,
+            CAST(SERVERPROPERTY('IsClustered') AS BIT) as is_clustered,
+            CAST(SERVERPROPERTY('IsHadrEnabled') AS BIT) as is_hadr_enabled,
             GETDATE() as analysis_time,
             @@LANGUAGE as language_setting,
             @@LOCK_TIMEOUT as lock_timeout,
@@ -77,12 +77,12 @@ class ServerConfigAnalyzer:
         query = """
         SELECT 
             configuration_id,
-            name,
+            CAST(name AS VARCHAR(100)) as name,
             value,
             minimum,
             maximum,
             value_in_use,
-            description,
+            CAST(description AS VARCHAR(500)) as description,
             is_dynamic,
             is_advanced
         FROM sys.configurations
@@ -96,11 +96,11 @@ class ServerConfigAnalyzer:
         try:
             # Get memory settings
             memory_query = """
-            SELECT 
-                c.name,
+            SELECT
+                CAST(c.name AS VARCHAR(100)) as name,
                 c.value,
                 c.value_in_use,
-                c.description
+                CAST(c.description AS VARCHAR(500)) as description
             FROM sys.configurations c
             WHERE c.name IN (
                 'max server memory (MB)',
@@ -192,9 +192,21 @@ class ServerConfigAnalyzer:
             SELECT 
                 cpu_count,
                 hyperthread_ratio,
-                physical_cpu_count,
-                socket_count,
-                cores_per_socket
+                CASE 
+                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'physical_cpu_count', 'ColumnId') IS NOT NULL 
+                    THEN (SELECT physical_cpu_count FROM sys.dm_os_sys_info)
+                    ELSE cpu_count / hyperthread_ratio
+                END as physical_cpu_count,
+                CASE 
+                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'socket_count', 'ColumnId') IS NOT NULL 
+                    THEN (SELECT socket_count FROM sys.dm_os_sys_info)
+                    ELSE 1
+                END as socket_count,
+                CASE 
+                    WHEN COLUMNPROPERTY(OBJECT_ID('sys.dm_os_sys_info'), 'cores_per_socket', 'ColumnId') IS NOT NULL 
+                    THEN (SELECT cores_per_socket FROM sys.dm_os_sys_info)
+                    ELSE cpu_count
+                END as cores_per_socket
             FROM sys.dm_os_sys_info
             """
             

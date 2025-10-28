@@ -241,7 +241,7 @@ class PlanCacheAnalyzer:
             SELECT 
                 type,
                 SUM(pages_kb) / 1024 AS size_mb,
-                SUM(pages_in_use_kb) / 1024 AS pages_in_use_mb
+                SUM(pages_kb) / 1024 AS pages_in_use_mb  -- Fallback since pages_in_use_kb not available in older versions
             FROM sys.dm_os_memory_clerks
             WHERE type IN ('CACHESTORE_SQLCP', 'CACHESTORE_OBJCP', 'CACHESTORE_PHDR')
             GROUP BY type

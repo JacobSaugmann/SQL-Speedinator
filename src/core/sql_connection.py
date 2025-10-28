@@ -177,16 +177,16 @@ class SQLServerConnection:
     def get_server_info(self) -> Optional[List[Dict[str, Any]]]:
         """Get basic server information"""
         query = """
-        SELECT 
+        SELECT
             @@SERVERNAME as server_name,
             @@VERSION as version,
-            SERVERPROPERTY('ProductVersion') as product_version,
-            SERVERPROPERTY('ProductLevel') as product_level,
-            SERVERPROPERTY('Edition') as edition,
+            CAST(SERVERPROPERTY('ProductVersion') AS VARCHAR(50)) as product_version,
+            CAST(SERVERPROPERTY('ProductLevel') AS VARCHAR(50)) as product_level,
+            CAST(SERVERPROPERTY('Edition') AS VARCHAR(200)) as edition,
             SERVERPROPERTY('EngineEdition') as engine_edition,
-            SERVERPROPERTY('MachineName') as machine_name,
-            SERVERPROPERTY('InstanceName') as instance_name,
-            SERVERPROPERTY('Collation') as collation
+            CAST(SERVERPROPERTY('MachineName') AS VARCHAR(100)) as machine_name,
+            CAST(SERVERPROPERTY('InstanceName') AS VARCHAR(100)) as instance_name,
+            CAST(SERVERPROPERTY('Collation') AS VARCHAR(100)) as collation
         """
         return self.execute_query(query)
     

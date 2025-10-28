@@ -90,17 +90,16 @@ class WaitStatsAnalyzer:
         # For now, we'll get session-level waits
         query = """
         SELECT 
-            session_id,
-            wait_type,
-            wait_duration_ms,
-            wait_resource,
-            blocking_session_id
+            r.session_id,
+            r.wait_type,
+            r.wait_time,
+            r.wait_resource,
+            r.blocking_session_id
         FROM sys.dm_exec_requests r
-        CROSS APPLY sys.dm_exec_sessions s
-        WHERE r.session_id = s.session_id
-        AND r.wait_type IS NOT NULL
+        INNER JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+        WHERE r.wait_type IS NOT NULL
         AND r.session_id > 50
-        ORDER BY wait_duration_ms DESC
+        ORDER BY r.wait_time DESC
         """
         
         return self.connection.execute_query(query)
