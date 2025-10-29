@@ -60,10 +60,18 @@ class ConfigManager:
                 return int(value)
             elif convert_type == float:
                 return float(value)
+            elif convert_type == list:
+                if isinstance(value, str):
+                    # Split by comma and strip whitespace
+                    return [item.strip() for item in value.split(',') if item.strip()]
+                return list(value)
             else:
                 return str(value)
         except (ValueError, AttributeError) as e:
             self.logger.warning(f"Error converting {key}={value} to {convert_type.__name__}: {e}")
+            # For test compatibility, we should raise the exception for invalid conversions
+            if convert_type in (int, float, bool, list):
+                raise ValueError(f"Cannot convert '{value}' to {convert_type.__name__}")
             return default
     
     # SQL Server Connection Settings

@@ -1,0 +1,23 @@
+# Development and Testing Dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.1
+pytest-html>=3.2.0
+pytest-xdist>=3.3.1
+coverage>=7.3.0
+mock>=5.1.0
+
+# For async testing
+pytest-asyncio>=0.21.1
+
+# For performance testing
+pytest-benchmark>=4.0.0
+
+# Test data generation
+factory-boy>=3.3.0
+faker>=19.0.0
+
+# Additional test utilities
+freezegun>=1.2.2
+responses>=0.23.3
+parameterized>=0.9.0

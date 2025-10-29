@@ -3,13 +3,13 @@ Simple Server Analyzer for broader SQL Server compatibility
 """
 import logging
 from typing import Dict, Any, List, Optional
-from ..core.sql_connection import SQLConnection
+from ..core.sql_connection import SQLServerConnection
 from ..core.config_manager import ConfigManager
 
 class SimpleServerAnalyzer:
     """Simplified server analyzer that works with older SQL Server versions"""
     
-    def __init__(self, connection: SQLConnection, config: ConfigManager):
+    def __init__(self, connection: SQLServerConnection, config: ConfigManager):
         self.connection = connection
         self.config = config
         self.logger = logging.getLogger(__name__)

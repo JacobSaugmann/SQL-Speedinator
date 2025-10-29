@@ -119,12 +119,11 @@ class IndexAnalyzer:
             self.logger.warning("No user databases found for unused index analysis")
             return None
         
-        # Save current database context (likely master)
-        original_db_query = "SELECT DB_NAME() as current_db"
-        original_db_result = self.connection.execute_query(original_db_query)
-        original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
-        
         try:
+            # Save current database context (likely master)
+            original_db_query = "SELECT DB_NAME() as current_db"
+            original_db_result = self.connection.execute_query(original_db_query)
+            original_db = original_db_result[0]['current_db'] if original_db_result else 'master'
             for db_name in user_databases:
                 self.logger.info(f"Analyzing unused indexes in database: {db_name}")
                 
@@ -181,7 +180,10 @@ class IndexAnalyzer:
             self.logger.error(f"Error during unused index analysis: {str(e)}")
         finally:
             # Restore original database context
-            self.connection.change_database(original_db)
+            if 'original_db' in locals():
+                self.connection.change_database(original_db)
+            else:
+                self.connection.change_database('master')
         
         return unused_indexes if unused_indexes else None
     
