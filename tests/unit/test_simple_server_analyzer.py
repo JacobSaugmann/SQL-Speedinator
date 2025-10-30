@@ -68,9 +68,11 @@ class TestSimpleServerAnalyzer:
         """Sample memory info data"""
         return [{
             'total_physical_memory_gb': 16.0,
-            'available_memory_gb': 8.0,
-            'sql_memory_gb': 12.0,
-            'memory_usage_percentage': 75.0
+            'total_virtual_memory_gb': 20.0,
+            'committed_memory_gb': 12.0,
+            'committed_target_gb': 14.0,
+            'max_workers_count': 512,
+            'scheduler_count': 8
         }]
     
     @pytest.fixture
@@ -130,7 +132,18 @@ class TestSimpleServerAnalyzer:
         
         result = analyzer.analyze()
         
-        assert result == {}
+        # Should return structured result with empty data when individual methods fail
+        expected_structure = {
+            'server_instance_info': {},
+            'database_overview': [],
+            'memory_info': {},
+            'database_files': [],
+            'server_configuration': [],
+            'cpu_info': {},
+            'security_info': {},
+            'backup_info': []
+        }
+        assert result == expected_structure
     
     def test_get_basic_server_info_success(self, analyzer, sample_server_info):
         """Test successful basic server info retrieval"""
@@ -225,14 +238,15 @@ class TestSimpleServerAnalyzer:
         assert result == []
     
     def test_get_basic_memory_info_success(self, analyzer, sample_memory_info):
-        """Test successful memory info retrieval"""
+        """Test successful basic memory info retrieval"""
         analyzer.connection.execute_query.return_value = sample_memory_info
         
         result = analyzer._get_basic_memory_info()
         
         assert isinstance(result, dict)
         assert result['total_physical_memory_gb'] == 16.0
-        assert result['memory_usage_percentage'] == 75.0
+        assert result['memory_usage_percentage'] == 75.0  # 12/16 * 100 = 75%
+        assert result['memory_pressure'] == 'NORMAL'
     
     def test_get_basic_memory_info_empty_result(self, analyzer):
         """Test memory info with empty result"""
@@ -330,14 +344,25 @@ class TestSimpleServerAnalyzer:
     def test_error_logging_on_exceptions(self, analyzer):
         """Test that errors are properly logged"""
         with patch.object(analyzer.logger, 'error') as mock_logger:
-            analyzer.connection.execute_query.side_effect = Exception("Test error")
+            analyzer.connection.execute_query.side_effect = Exception("All queries fail")
             
             # This should trigger error logging
             result = analyzer.analyze()
             
-            # Verify error was logged
-            mock_logger.assert_called()
-            assert result == {}
+            # Verify error was logged at least once
+            assert mock_logger.call_count >= 1
+            # Should return structured result with empty data
+            expected_structure = {
+                'server_instance_info': {},
+                'database_overview': [],
+                'memory_info': {},
+                'database_files': [],
+                'server_configuration': [],
+                'cpu_info': {},
+                'security_info': {},
+                'backup_info': []
+            }
+            assert result == expected_structure
     
     def test_success_logging_on_completion(self, analyzer, sample_server_info, sample_database_info, sample_memory_info, sample_file_info):
         """Test that success is properly logged"""
@@ -356,16 +381,8 @@ class TestSimpleServerAnalyzer:
             assert isinstance(result, dict)
     
     def test_all_result_keys_present_even_with_failures(self, analyzer):
-        """Test that all expected keys are present in result even when methods fail"""
-        # All methods fail
-        analyzer.connection.execute_query.side_effect = Exception("All queries fail")
-        
-        result = analyzer.analyze()
-        
-        # Should still return empty dict due to exception in main analyze method
-        assert result == {}
-        
-        # Test with partial success - mock the main analyze method to not fail completely
+        """Test that all expected keys are present in result even when individual methods fail"""
+        # Test with partial success - mock individual methods to simulate failures
         with patch.object(analyzer, '_get_basic_server_info', return_value={}):
             with patch.object(analyzer, '_get_basic_database_info', return_value=[]):
                 with patch.object(analyzer, '_get_basic_memory_info', return_value={}):
@@ -378,5 +395,6 @@ class TestSimpleServerAnalyzer:
                             'security_info', 'backup_info'
                         ]
                         
+                        # All keys should be present even if methods return empty data
                         for key in expected_keys:
                             assert key in result
