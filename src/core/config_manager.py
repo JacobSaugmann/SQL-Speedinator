@@ -258,5 +258,5 @@ class ConfigManager:
                 return [int(d.strip()) for d in days_str.split(',')]
             else:
                 return [1,2,3,4,5]  # Default to weekdays
-        except:
+        except (ValueError, AttributeError):
             return [1,2,3,4,5]  # Default to weekdays

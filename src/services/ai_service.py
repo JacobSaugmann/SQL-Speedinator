@@ -11,12 +11,19 @@ from openai import AzureOpenAI
 try:
     from ..core.config_manager import ConfigManager
     from ..reports.text_formatter import TextFormatter
+    from ..core.circuit_breaker import CircuitBreaker
+    from ..core.exceptions import AIServiceUnavailableError, AIError
 except ImportError:
     from core.config_manager import ConfigManager
     from reports.text_formatter import TextFormatter
+    from core.circuit_breaker import CircuitBreaker
+    from core.exceptions import AIServiceUnavailableError, AIError
 
 class AIService:
-    """Azure OpenAI service for performance analysis insights"""
+    """Azure OpenAI service for performance analysis insights
+    
+    Uses circuit breaker pattern to prevent cascading failures from external AI service
+    """
     
     def __init__(self, config: ConfigManager):
         """Initialize AI service with configuration
@@ -28,6 +35,12 @@ class AIService:
         self.logger = logging.getLogger(__name__)
         self.text_formatter = TextFormatter()
         self.client = None
+        self.circuit_breaker = CircuitBreaker(
+            name="AIService",
+            failure_threshold=3,
+            recovery_timeout=60,
+            expected_exception=AIError
+        )
         
         if config.be_my_copilot:
             if not config.validate_ai_config():
@@ -465,7 +478,7 @@ class AIService:
             try:
                 import json
                 return json.loads(content)
-            except:
+            except (json.JSONDecodeError, ValueError):
                 # If JSON parsing fails, create structured response
                 return {
                     'analysis': content,

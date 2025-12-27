@@ -174,7 +174,7 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         if not current_waits:
             return {}
         
-        analysis = {
+        analysis: Dict[str, Any] = {
             'total_waits': len(current_waits),
             'top_wait_category': None,
             'io_waits_percentage': 0,

@@ -4,7 +4,7 @@ Handles different SQL Server versions and provides compatible queries
 """
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 from src.core.sql_connection import SQLServerConnection
 
 class SQLVersionManager:
@@ -13,10 +13,10 @@ class SQLVersionManager:
     def __init__(self, connection: SQLServerConnection):
         self.connection = connection
         self.logger = logging.getLogger(__name__)
-        self._version_info = None
-        self._capabilities = None
+        self._version_info: Optional[Dict[str, Any]] = None
+        self._capabilities: Optional[Dict[str, Any]] = None
     
-    def detect_version(self) -> Dict:
+    def detect_version(self) -> Dict[str, Any]:
         """Detect SQL Server version and capabilities"""
         if self._version_info is not None:
             return self._version_info
@@ -82,7 +82,7 @@ class SQLVersionManager:
         
         return self._version_info
     
-    def get_capabilities(self) -> Dict:
+    def get_capabilities(self) -> Dict[str, Any]:
         """Get version-specific capabilities"""
         if self._capabilities is not None:
             return self._capabilities

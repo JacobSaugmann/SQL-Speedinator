@@ -194,7 +194,7 @@ class PerformanceCounterAnalyzer:
     def _parse_json_data(self, json_file: str) -> Dict[str, List[Tuple[datetime, float]]]:
         """Parse JSON performance data from PowerShell Get-Counter"""
         try:
-            performance_data = {}
+            performance_data: Dict[str, List[Tuple[datetime, float]]] = {}
             
             # Read with utf-8-sig to handle BOM
             with open(json_file, 'r', encoding='utf-8-sig') as f:
@@ -298,7 +298,7 @@ class PerformanceCounterAnalyzer:
     def _parse_csv_data(self, csv_file: str) -> Dict[str, List[Tuple[datetime, float]]]:
         """Parse CSV performance data"""
         try:
-            performance_data = {}
+            performance_data: Dict[str, List[Tuple[datetime, float]]] = {}
             
             with open(csv_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
