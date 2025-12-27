@@ -117,6 +117,9 @@ class AIService:
     def analyze_performance_summary(self, performance_summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze performance data and provide AI recommendations
         
+        Uses circuit breaker to prevent cascading failures if AI service is unavailable.
+        Falls back to basic analysis if circuit is open.
+        
         Args:
             performance_summary: Condensed performance analysis data
             
@@ -127,6 +130,36 @@ class AIService:
             self.logger.info("AI Copilot not enabled or not configured")
             return None
         
+        try:
+            # Use circuit breaker to call AI service
+            result = self.circuit_breaker.call(
+                self._call_ai_service,
+                performance_summary
+            )
+            return result
+            
+        except AIServiceUnavailableError as e:
+            self.logger.warning(f"AI service unavailable (circuit open): {e}")
+            # Return graceful fallback - analysis continues without AI
+            return self._create_basic_fallback_analysis(performance_summary)
+            
+        except AIError as e:
+            self.logger.error(f"AI service error: {e}")
+            # Log but don't fail - analysis continues
+            return self._create_basic_fallback_analysis(performance_summary)
+            
+    def _call_ai_service(self, performance_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Internal method called by circuit breaker
+        
+        Args:
+            performance_summary: Performance data to analyze
+            
+        Returns:
+            AI analysis result
+            
+        Raises:
+            AIError: If service call fails
+        """
         try:
             # Create efficient prompt to minimize tokens
             prompt = self._create_analysis_prompt(performance_summary)
@@ -169,24 +202,57 @@ class AIService:
             
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse AI response as JSON: {e}")
-            # Fallback to text response
-            return {
-                'ai_enabled': True,
-                'model_used': self.config.azure_openai_model,
-                'analysis': {'recommendations': [ai_response]},
-                'tokens_used': response.usage.total_tokens if response.usage else 0,
-                'generated_at': None
-            }
+            raise AIError(f"JSON parse error: {e}", error_code="JSON_PARSE_ERROR")
             
         except Exception as e:
-            self.logger.error(f"AI analysis failed: {e}")
-            return {
-                'ai_enabled': True,
-                'model_used': self.config.azure_openai_model,
-                'analysis': {'error': f"AI analysis failed: {str(e)}"},
-                'tokens_used': 0,
-                'generated_at': None
-            }
+            self.logger.error(f"AI service call failed: {e}", exc_info=True)
+            raise AIError(f"Service call failed: {e}", error_code="SERVICE_CALL_ERROR")
+    
+    def _create_basic_fallback_analysis(self, performance_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """Create basic analysis without AI when service is unavailable
+        
+        Allows analysis to continue gracefully even if AI is down.
+        """
+        self.logger.info("Creating fallback analysis (AI service unavailable)")
+        
+        recommendations = []
+        
+        # Basic rule-based recommendations
+        wait_stats = performance_summary.get('wait_stats', {})
+        if wait_stats.get('top_waits'):
+            top_wait = wait_stats['top_waits'][0]
+            recommendations.append({
+                'issue': f"High {top_wait.get('wait_type', 'Unknown')} waits",
+                'impact': 'HIGH',
+                'recommendation': 'Review query plans and index strategy for this wait type'
+            })
+        
+        disk_issues = performance_summary.get('disk_issues', [])
+        if disk_issues:
+            recommendations.append({
+                'issue': 'Disk performance issues detected',
+                'impact': 'HIGH',
+                'recommendation': 'Check disk I/O patterns and consider index defragmentation'
+            })
+        
+        index_issues = performance_summary.get('index_issues', {})
+        if index_issues.get('high_fragmentation_count', 0) > 0:
+            recommendations.append({
+                'issue': f"{index_issues['high_fragmentation_count']} highly fragmented indexes",
+                'impact': 'MEDIUM',
+                'recommendation': 'Schedule index maintenance (rebuild/reorganize)'
+            })
+        
+        return {
+            'ai_enabled': False,
+            'model_used': None,
+            'analysis': {
+                'bottlenecks': recommendations,
+                'summary': 'Basic analysis (AI service unavailable - continuing without AI recommendations)'
+            },
+            'tokens_used': 0,
+            'generated_at': None
+        }
     
     def _create_analysis_prompt(self, performance_summary: Dict[str, Any]) -> str:
         """Create an efficient prompt for AI analysis to minimize token usage

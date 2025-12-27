@@ -9,8 +9,12 @@ from typing import Dict, Any, List, Optional
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import AnalysisError, DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import AnalysisError, DatabaseQueryError
 
 class IndexAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server indexes for fragmentation and usage patterns"""
@@ -38,11 +42,11 @@ class IndexAnalyzer(BaseAnalyzer):
         result = self.connection.execute_query(query)
         return [row['name'] for row in result] if result else []
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete index analysis
         
         Returns:
-            Dictionary containing index analysis results
+            AnalysisResult with index analysis data
         """
         try:
             # Collect all analysis results first
@@ -68,11 +72,21 @@ class IndexAnalyzer(BaseAnalyzer):
                 'recommendations': recommendations
             }
             
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in index analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Index query failed: {e}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in index analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Unexpected error in index analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Index analysis failed: {e}",
+                error_type="analysis"
+            )
     
     def _get_fragmented_indexes(self) -> Optional[List[Dict[str, Any]]]:
         """Get highly fragmented indexes that need attention"""

@@ -10,8 +10,12 @@ from datetime import datetime, timedelta
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import AnalysisError, DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import AnalysisError, DatabaseQueryError
 
 class WaitStatsAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server wait statistics for performance bottlenecks"""
@@ -25,11 +29,11 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         """
         super().__init__(connection, config)
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete wait statistics analysis
         
         Returns:
-            Dictionary containing wait statistics analysis results
+            AnalysisResult with wait statistics analysis data
         """
         try:
             results = {
@@ -40,11 +44,21 @@ class WaitStatsAnalyzer(BaseAnalyzer):
                 'recommendations': self._generate_wait_recommendations()
             }
             
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in wait stats analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Wait stats query failed: {e}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in wait stats analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Unexpected error in wait stats analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Wait stats analysis failed: {e}",
+                error_type="analysis"
+            )
     
     def _get_current_waits(self) -> Optional[List[Dict[str, Any]]]:
         """Get current wait statistics snapshot"""

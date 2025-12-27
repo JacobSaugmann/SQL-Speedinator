@@ -10,8 +10,12 @@ from src.core.sql_version_manager import SQLVersionManager
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import AnalysisError, DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import AnalysisError, DatabaseQueryError
 
 class ServerConfigAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server configuration for best practices compliance"""
@@ -26,11 +30,11 @@ class ServerConfigAnalyzer(BaseAnalyzer):
         super().__init__(connection, config)
         self.version_manager = SQLVersionManager(connection)
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete server configuration analysis
         
         Returns:
-            Dictionary containing configuration analysis results
+            AnalysisResult with configuration analysis data
         """
         try:
             results = {
@@ -44,11 +48,21 @@ class ServerConfigAnalyzer(BaseAnalyzer):
                 'recommendations': self._generate_config_recommendations()
             }
             
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in config analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Config query failed: {e}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in server config analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Unexpected error in config analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Config analysis failed: {e}",
+                error_type="analysis"
+            )
     
     def _get_server_info(self) -> Optional[List[Dict[str, Any]]]:
         """Get basic server information and version details"""

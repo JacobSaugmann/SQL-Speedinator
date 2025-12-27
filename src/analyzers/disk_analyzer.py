@@ -12,8 +12,12 @@ from typing import Dict, Any, List, Optional
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import AnalysisError, DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import AnalysisError, DatabaseQueryError
 
 class DiskAnalyzer(BaseAnalyzer):
     """Analyzes disk performance for SQL Server"""
@@ -27,11 +31,11 @@ class DiskAnalyzer(BaseAnalyzer):
         """
         super().__init__(connection, config)
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete disk performance analysis
         
         Returns:
-            Dictionary containing comprehensive disk analysis results
+            AnalysisResult with comprehensive disk analysis
         """
         try:
             results = {
@@ -46,11 +50,21 @@ class DiskAnalyzer(BaseAnalyzer):
                 'recommendations': self._generate_disk_recommendations()
             }
             
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in disk analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Database query failed: {e}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in disk analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Unexpected error in disk analysis: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error_msg=f"Disk analysis failed: {e}",
+                error_type="analysis"
+            )
     
     def _get_sql_disk_stats(self) -> Optional[List[Dict[str, Any]]]:
         """Get disk I/O statistics from SQL Server DMVs"""
