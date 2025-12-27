@@ -6,6 +6,8 @@ Correlates multiple performance metrics to provide smart, actionable recommendat
 import logging
 from typing import Dict, List, Any, Optional
 
+# Note: IntelligentRecommendationsEngine doesn't inherit from BaseAnalyzer 
+# since it doesn't take a connection - it works with aggregated analysis results
 class IntelligentRecommendationsEngine:
     """Correlates performance metrics and generates intelligent recommendations"""
     

@@ -1,6 +1,19 @@
 """
 Analysis Status Tracker and User Feedback System
 Provides real-time status updates and progress tracking for all analysis phases
+
+IMPORTANT: This module intentionally uses print() for real-time interactive console UI:
+- Progress bar with \r carriage return (lines 314)
+- Summary output with formatting (lines 347-391)
+- Live metrics display (line 413)
+
+These are NOT suitable for logging because:
+1. Progress bars need to overwrite with \r (not compatible with loggers)
+2. Centered formatting and emojis are for user-facing UI, not logs
+3. Real-time interactive output is different from error/audit logging
+
+All errors and exceptions in this module use self.logger.error() as appropriate.
+All analysis data logging is done via self.logger.info().
 """
 
 import logging

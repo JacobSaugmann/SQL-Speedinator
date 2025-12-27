@@ -10,7 +10,12 @@ import os
 import subprocess
 from typing import Dict, Any, List, Optional
 
-class DiskAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class DiskAnalyzer(BaseAnalyzer):
     """Analyzes disk performance for SQL Server"""
     
     def __init__(self, connection, config):
@@ -20,9 +25,7 @@ class DiskAnalyzer:
             connection: SQLServerConnection instance
             config: ConfigManager instance
         """
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
     
     def analyze(self) -> Dict[str, Any]:
         """Run complete disk performance analysis

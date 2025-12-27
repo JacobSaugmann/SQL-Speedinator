@@ -6,13 +6,16 @@ from typing import Dict, Any, List, Optional
 from ..core.sql_connection import SQLServerConnection
 from ..core.config_manager import ConfigManager
 
-class SimpleServerAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class SimpleServerAnalyzer(BaseAnalyzer):
     """Simplified server analyzer that works with older SQL Server versions"""
     
     def __init__(self, connection: SQLServerConnection, config: ConfigManager):
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
     
     def analyze(self) -> Dict[str, Any]:
         """Perform simplified server analysis using basic queries"""

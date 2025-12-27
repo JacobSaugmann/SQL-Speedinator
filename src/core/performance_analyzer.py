@@ -56,16 +56,18 @@ class PerformanceAnalyzer:
         self.analysis_results = {}
     
     def run_full_analysis(self) -> Dict[str, Any]:
-        """Run complete performance analysis
+        """Run complete performance analysis - orchestrator method
+        
+        Coordinates all analysis steps and returns comprehensive results.
         
         Returns:
-            Dictionary containing all analysis results
+            Dictionary containing all analysis results with metadata and recommendations
         """
         self.logger.info("Starting comprehensive SQL Server performance analysis")
         
         analysis_start = datetime.now()
         
-        # Get server information first
+        # Initialize base results
         self.analysis_results['server_info'] = self._get_server_info()
         self.analysis_results['analysis_metadata'] = {
             'start_time': analysis_start,
@@ -73,7 +75,35 @@ class PerformanceAnalyzer:
             'analyzer_version': '1.0.0'
         }
         
-        # Define analysis steps
+        # Execute all standard analysis steps
+        self._execute_analysis_steps()
+        
+        # Calculate timing and update metadata
+        analysis_duration = (datetime.now() - analysis_start).total_seconds()
+        self.analysis_results['analysis_metadata']['end_time'] = datetime.now()
+        self.analysis_results['analysis_metadata']['total_duration_seconds'] = analysis_duration
+        self._update_metadata()
+        
+        self.logger.info(f"Complete analysis finished in {analysis_duration:.2f} seconds")
+        
+        # Generate initial summary and recommendations
+        self.analysis_results['summary'] = self._generate_summary()
+        self.analysis_results['recommendations'] = self._generate_recommendations()
+        
+        # Run intelligent correlation analysis
+        self._run_intelligent_correlations()
+        
+        # Run AI analysis if enabled
+        self._run_ai_analysis_if_enabled()
+        
+        return self.analysis_results
+    
+    def _execute_analysis_steps(self) -> None:
+        """Execute all standard analysis steps with timing and error handling
+        
+        Runs each analysis step, records timing, applies night mode delays,
+        and captures both results and errors.
+        """
         analysis_steps = [
             ('server_database_info', 'Server and Database Information', self.server_database_analyzer.analyze),
             ('wait_stats', 'Wait Statistics Analysis', self.wait_stats_analyzer.analyze),
@@ -87,7 +117,6 @@ class PerformanceAnalyzer:
             ('log_analysis', 'Log Analysis (SQL Server & Windows Events)', self.log_analyzer.analyze_logs),
         ]
         
-        # Execute analysis steps
         for step_key, step_name, analyzer_func in analysis_steps:
             try:
                 self.logger.info(f"Running {step_name}...")
@@ -116,22 +145,13 @@ class PerformanceAnalyzer:
                     'error': str(e),
                     'timestamp': datetime.now()
                 }
+    
+    def _run_intelligent_correlations(self) -> None:
+        """Run intelligent correlation analysis and merge recommendations
         
-        # Calculate total analysis time
-        analysis_duration = (datetime.now() - analysis_start).total_seconds()
-        self.analysis_results['analysis_metadata']['end_time'] = datetime.now()
-        self.analysis_results['analysis_metadata']['total_duration_seconds'] = analysis_duration
-        
-        # Add database count to metadata
-        self._update_metadata()
-        
-        self.logger.info(f"Complete analysis finished in {analysis_duration:.2f} seconds")
-        
-        # Generate summary and recommendations
-        self.analysis_results['summary'] = self._generate_summary()
-        self.analysis_results['recommendations'] = self._generate_recommendations()
-        
-        # Generate intelligent correlation analysis and enhanced recommendations
+        Analyzes relationships between findings and adds correlated
+        recommendations to the results with intelligent source tracking.
+        """
         try:
             self.logger.info("Running intelligent correlation analysis...")
             correlation_start = datetime.now()
@@ -142,12 +162,12 @@ class PerformanceAnalyzer:
                 self.analysis_results['intelligent_correlations'] = correlation_results
                 self.logger.info(f"Intelligent correlation analysis completed in {correlation_duration:.2f} seconds")
                 
-                # Add correlated recommendations to existing recommendations
+                # Merge intelligent recommendations with existing ones
                 if 'recommendations' in correlation_results:
                     if 'recommendations' not in self.analysis_results:
                         self.analysis_results['recommendations'] = []
                     
-                    # Add intelligent recommendations with priority markers
+                    # Add with source tracking
                     for rec in correlation_results['recommendations']:
                         rec['source'] = 'intelligent_correlation'
                         self.analysis_results['recommendations'].append(rec)
@@ -163,32 +183,37 @@ class PerformanceAnalyzer:
                 'timestamp': datetime.now()
             }
         
-        # Update summary with recommendations count
+        # Update summary with final recommendations count
         if 'recommendations' in self.analysis_results:
             self.analysis_results['summary']['recommendations_count'] = len(self.analysis_results['recommendations'])
+    
+    def _run_ai_analysis_if_enabled(self) -> None:
+        """Run AI Copilot analysis if configured
         
-        # Run AI analysis if enabled
-        if self.config.be_my_copilot:
-            try:
-                self.logger.info("Running AI Copilot analysis...")
-                ai_start = datetime.now()
-                ai_result = self.ai_analyzer.analyze(self.analysis_results)
-                ai_duration = (datetime.now() - ai_start).total_seconds()
+        Conditionally executes AI analysis based on config setting
+        and stores results or error information.
+        """
+        if not self.config.be_my_copilot:
+            return
+        
+        try:
+            self.logger.info("Running AI Copilot analysis...")
+            ai_start = datetime.now()
+            ai_result = self.ai_analyzer.analyze(self.analysis_results)
+            ai_duration = (datetime.now() - ai_start).total_seconds()
+            
+            if ai_result:
+                self.analysis_results['ai_analysis'] = ai_result
+                self.logger.info(f"AI analysis completed in {ai_duration:.2f} seconds")
+            else:
+                self.logger.warning("AI analysis returned no results")
                 
-                if ai_result:
-                    self.analysis_results['ai_analysis'] = ai_result
-                    self.logger.info(f"AI analysis completed in {ai_duration:.2f} seconds")
-                else:
-                    self.logger.warning("AI analysis returned no results")
-                    
-            except Exception as e:
-                self.logger.error(f"AI analysis failed: {e}", exc_info=True)
-                self.analysis_results['ai_analysis'] = {
-                    'ai_enabled': True,
-                    'analysis': {'error': f'AI analysis failed: {str(e)}'}
-                }
-        
-        return self.analysis_results
+        except Exception as e:
+            self.logger.error(f"AI analysis failed: {e}", exc_info=True)
+            self.analysis_results['ai_analysis'] = {
+                'ai_enabled': True,
+                'analysis': {'error': f'AI analysis failed: {str(e)}'}
+            }
     
     def _get_server_info(self) -> Dict[str, Any]:
         """Get basic server information"""

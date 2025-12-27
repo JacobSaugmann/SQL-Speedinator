@@ -7,7 +7,12 @@ import logging
 from typing import Dict, Any, List, Optional
 from decimal import Decimal
 
-class ServerDatabaseAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class ServerDatabaseAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server instance and database information"""
     
     def __init__(self, connection, config):
@@ -17,9 +22,7 @@ class ServerDatabaseAnalyzer:
             connection: SQLServerConnection instance
             config: ConfigManager instance
         """
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
     
     def analyze(self) -> Dict[str, Any]:
         """Run complete server and database analysis

@@ -7,7 +7,12 @@ Inspired by the great ones and SQL Server community methodologies
 import logging
 from typing import Dict, Any, List, Optional
 
-class IndexAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class IndexAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server indexes for fragmentation and usage patterns"""
     
     def __init__(self, connection, config):
@@ -17,9 +22,7 @@ class IndexAnalyzer:
             connection: SQLServerConnection instance
             config: ConfigManager instance
         """
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
     
     def _get_user_databases(self) -> List[str]:
         """Get list of user databases (excluding system databases)"""

@@ -11,6 +11,8 @@ try:
 except ImportError:
     from services.ai_service import AIService
 
+# Note: AIAnalyzer doesn't inherit from BaseAnalyzer since it doesn't take a connection
+# It's a specialized analyzer that works with aggregated data
 class AIAnalyzer:
     """Analyzes performance data and generates AI-powered insights"""
     

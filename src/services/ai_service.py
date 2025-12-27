@@ -5,14 +5,15 @@ Provides AI-powered analysis and recommendations using Azure OpenAI GPT models
 
 import logging
 import json
-import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from openai import AzureOpenAI
 try:
     from ..core.config_manager import ConfigManager
+    from ..reports.text_formatter import TextFormatter
 except ImportError:
     from core.config_manager import ConfigManager
+    from reports.text_formatter import TextFormatter
 
 class AIService:
     """Azure OpenAI service for performance analysis insights"""
@@ -25,6 +26,7 @@ class AIService:
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.text_formatter = TextFormatter()
         self.client = None
         
         if config.be_my_copilot:
@@ -82,31 +84,18 @@ class AIService:
                 self.client = None
     
     def _clean_html_tags(self, text: str) -> str:
-        """Clean malformed HTML tags like '>green>' from AI responses"""
-        if not isinstance(text, str):
-            return text
-            
-        # Fix malformed tags like '>green>', '>red>', '>orange>' - convert to plain text with emojis
-        text = re.sub(r'>green>', '🟢 OK', text)
-        text = re.sub(r'>red>', '🔴 CRITICAL', text) 
-        text = re.sub(r'>orange>', '🟠 WARNING', text)
-        text = re.sub(r'>yellow>', '🟡 CAUTION', text)
+        """Clean malformed HTML tags like '>green>' from AI responses
         
-        # Remove any other malformed > tags
-        text = re.sub(r'>(\w+)>', r'\1', text)
-        
-        return text
+        Delegates to TextFormatter for centralized HTML tag cleaning.
+        """
+        return self.text_formatter.clean_html_tags(text)
     
     def _clean_dict_recursively(self, obj):
-        """Recursively clean HTML tags in dictionary/list structures"""
-        if isinstance(obj, dict):
-            return {k: self._clean_dict_recursively(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._clean_dict_recursively(item) for item in obj]
-        elif isinstance(obj, str):
-            return self._clean_html_tags(obj)
-        else:
-            return obj
+        """Recursively clean HTML tags in dictionary/list structures
+        
+        Delegates to TextFormatter for centralized recursive cleaning.
+        """
+        return self.text_formatter.clean_dict_recursively(obj)
     
     def is_enabled(self) -> bool:
         """Check if AI service is enabled and configured"""
@@ -197,56 +186,14 @@ class AIService:
         """
         prompt_parts = []
         
-        # Server info (minimal)
-        server_info = performance_summary.get('server_info', {})
-        if server_info:
-            prompt_parts.append(f"Server: {server_info.get('edition', 'Unknown')} {server_info.get('version', '')}, {server_info.get('cpu_count', 'N/A')} CPUs, {server_info.get('total_memory_mb', 'N/A')}MB RAM")
+        # Build sections of the prompt
+        prompt_parts.append(self._format_server_info_section(performance_summary))
+        prompt_parts.append(self._format_wait_stats_section(performance_summary))
+        prompt_parts.append(self._format_disk_and_index_section(performance_summary))
+        prompt_parts.append(self._format_config_and_cache_section(performance_summary))
         
-        # Wait stats (top 5 only)
-        wait_stats = performance_summary.get('wait_stats', {})
-        if wait_stats and wait_stats.get('top_waits'):
-            top_waits = wait_stats['top_waits'][:5]
-            wait_list = [f"{w['wait_type']}({w['percentage']:.1f}%)" for w in top_waits]
-            prompt_parts.append(f"Top waits: {', '.join(wait_list)}")
-        
-        # Disk issues (critical only)
-        disk_issues = performance_summary.get('disk_issues', [])
-        if disk_issues:
-            critical_issues = [issue for issue in disk_issues if issue.get('severity') == 'HIGH'][:3]
-            if critical_issues:
-                disk_list = [f"{issue['database']}({issue['issue']})" for issue in critical_issues]
-                prompt_parts.append(f"Disk issues: {', '.join(disk_list)}")
-        
-        # Index problems (high impact only)
-        index_issues = performance_summary.get('index_issues', {})
-        if index_issues:
-            if index_issues.get('high_fragmentation_count', 0) > 0:
-                prompt_parts.append(f"High fragmentation: {index_issues['high_fragmentation_count']} indexes")
-            if index_issues.get('unused_count', 0) > 0:
-                prompt_parts.append(f"Unused indexes: {index_issues['unused_count']}")
-            if index_issues.get('missing_high_impact', 0) > 0:
-                prompt_parts.append(f"Missing high-impact indexes: {index_issues['missing_high_impact']}")
-        
-        # Config issues (critical only)
-        config_issues = performance_summary.get('config_issues', [])
-        if config_issues:
-            critical_config = [issue for issue in config_issues if issue.get('severity') == 'HIGH'][:3]
-            if critical_config:
-                config_list = [f"{issue['setting']}({issue['issue']})" for issue in critical_config]
-                prompt_parts.append(f"Config issues: {', '.join(config_list)}")
-        
-        # TempDB issues
-        tempdb_issues = performance_summary.get('tempdb_issues', [])
-        if tempdb_issues:
-            critical_tempdb = [issue for issue in tempdb_issues if issue.get('severity') == 'HIGH'][:2]
-            if critical_tempdb:
-                tempdb_list = [issue['description'] for issue in critical_tempdb]
-                prompt_parts.append(f"TempDB: {', '.join(tempdb_list)}")
-        
-        # Plan cache efficiency
-        plan_cache = performance_summary.get('plan_cache', {})
-        if plan_cache and plan_cache.get('single_use_pct', 0) > 10:
-            prompt_parts.append(f"Plan cache: {plan_cache['single_use_pct']:.1f}% single-use plans")
+        # Filter out empty sections
+        prompt_parts = [p for p in prompt_parts if p]
         
         if not prompt_parts:
             prompt_parts.append("No significant performance issues detected in summary data")
@@ -255,6 +202,73 @@ class AIService:
         prompt += "\n\nProvide JSON response with: {'bottlenecks': [{'issue': 'description', 'impact': 'HIGH/MEDIUM/LOW', 'recommendation': 'specific action'}], 'summary': 'overall assessment'}"
         
         return prompt
+    
+    def _format_server_info_section(self, performance_summary: Dict[str, Any]) -> str:
+        """Format server information section of prompt"""
+        server_info = performance_summary.get('server_info', {})
+        if not server_info:
+            return ""
+        return f"Server: {server_info.get('edition', 'Unknown')} {server_info.get('version', '')}, {server_info.get('cpu_count', 'N/A')} CPUs, {server_info.get('total_memory_mb', 'N/A')}MB RAM"
+    
+    def _format_wait_stats_section(self, performance_summary: Dict[str, Any]) -> str:
+        """Format wait statistics section of prompt"""
+        wait_stats = performance_summary.get('wait_stats', {})
+        if not wait_stats or not wait_stats.get('top_waits'):
+            return ""
+        top_waits = wait_stats['top_waits'][:5]
+        wait_list = [f"{w['wait_type']}({w['percentage']:.1f}%)" for w in top_waits]
+        return f"Top waits: {', '.join(wait_list)}"
+    
+    def _format_disk_and_index_section(self, performance_summary: Dict[str, Any]) -> str:
+        """Format disk performance and index issues section"""
+        sections = []
+        
+        # Disk issues
+        disk_issues = performance_summary.get('disk_issues', [])
+        if disk_issues:
+            critical = [i for i in disk_issues if i.get('severity') == 'HIGH'][:3]
+            if critical:
+                disk_list = [f"{issue['database']}({issue['issue']})" for issue in critical]
+                sections.append(f"Disk issues: {', '.join(disk_list)}")
+        
+        # Index problems
+        index_issues = performance_summary.get('index_issues', {})
+        if index_issues:
+            if index_issues.get('high_fragmentation_count', 0) > 0:
+                sections.append(f"High fragmentation: {index_issues['high_fragmentation_count']} indexes")
+            if index_issues.get('unused_count', 0) > 0:
+                sections.append(f"Unused indexes: {index_issues['unused_count']}")
+            if index_issues.get('missing_high_impact', 0) > 0:
+                sections.append(f"Missing high-impact indexes: {index_issues['missing_high_impact']}")
+        
+        return "\n".join(sections)
+    
+    def _format_config_and_cache_section(self, performance_summary: Dict[str, Any]) -> str:
+        """Format configuration and plan cache section"""
+        sections = []
+        
+        # Config issues
+        config_issues = performance_summary.get('config_issues', [])
+        if config_issues:
+            critical = [i for i in config_issues if i.get('severity') == 'HIGH'][:3]
+            if critical:
+                config_list = [f"{issue['setting']}({issue['issue']})" for issue in critical]
+                sections.append(f"Config issues: {', '.join(config_list)}")
+        
+        # TempDB issues
+        tempdb_issues = performance_summary.get('tempdb_issues', [])
+        if tempdb_issues:
+            critical = [i for i in tempdb_issues if i.get('severity') == 'HIGH'][:2]
+            if critical:
+                tempdb_list = [issue['description'] for issue in critical]
+                sections.append(f"TempDB: {', '.join(tempdb_list)}")
+        
+        # Plan cache efficiency
+        plan_cache = performance_summary.get('plan_cache', {})
+        if plan_cache and plan_cache.get('single_use_pct', 0) > 10:
+            sections.append(f"Plan cache: {plan_cache['single_use_pct']:.1f}% single-use plans")
+        
+        return "\n".join(sections)
     
     def analyze_perfmon_bottlenecks(self, perfmon_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze Performance Monitor data and provide AI-powered bottleneck insights
@@ -325,66 +339,13 @@ class AIService:
         """Create focused prompt for Performance Monitor analysis"""
         prompt_parts = []
         
-        # Collection summary
-        if 'summary' in perfmon_data:
-            summary = perfmon_data['summary']
-            prompt_parts.append(f"Collection: {summary.get('duration_minutes', 0):.1f} minutes, {summary.get('total_counters', 0)} counters")
+        # Build sections
+        prompt_parts.append(self._format_perfmon_collection_section(perfmon_data))
+        prompt_parts.append(self._format_perfmon_resource_sections(perfmon_data))
+        prompt_parts.append(self._format_perfmon_bottlenecks_section(perfmon_data))
         
-        # CPU metrics
-        if 'cpu_analysis' in perfmon_data:
-            cpu = perfmon_data['cpu_analysis']
-            if 'metrics' in cpu:
-                metrics = cpu['metrics']
-                status = cpu.get('status', 'OK')
-                if 'avg_processor_time' in metrics:
-                    prompt_parts.append(f"CPU: {metrics['avg_processor_time']}% avg usage ({status})")
-                if 'avg_processor_queue' in metrics:
-                    prompt_parts.append(f"CPU Queue: {metrics['avg_processor_queue']} avg length")
-        
-        # Memory metrics
-        if 'memory_analysis' in perfmon_data:
-            memory = perfmon_data['memory_analysis']
-            if 'metrics' in memory:
-                metrics = memory['metrics']
-                status = memory.get('status', 'OK')
-                if 'avg_available_mb' in metrics:
-                    prompt_parts.append(f"Memory: {metrics['avg_available_mb']:,.0f} MB avg available ({status})")
-                if 'avg_page_life_expectancy' in metrics:
-                    prompt_parts.append(f"Page Life Expectancy: {metrics['avg_page_life_expectancy']:,.0f} seconds")
-        
-        # Disk metrics
-        if 'disk_analysis' in perfmon_data:
-            disk = perfmon_data['disk_analysis']
-            if 'metrics' in disk:
-                metrics = disk['metrics']
-                status = disk.get('status', 'OK')
-                if 'avg_disk_queue_length' in metrics:
-                    prompt_parts.append(f"Disk Queue: {metrics['avg_disk_queue_length']} avg length ({status})")
-                if 'avg_disk_read_ms' in metrics:
-                    prompt_parts.append(f"Disk Latency: {metrics['avg_disk_read_ms']} ms avg read")
-        
-        # SQL Server metrics
-        if 'sql_server_analysis' in perfmon_data:
-            sql = perfmon_data['sql_server_analysis']
-            if 'metrics' in sql:
-                metrics = sql['metrics']
-                status = sql.get('status', 'OK')
-                if 'avg_batch_requests_per_sec' in metrics:
-                    prompt_parts.append(f"SQL Batches/sec: {metrics['avg_batch_requests_per_sec']} ({status})")
-                if 'avg_compilations_per_sec' in metrics:
-                    prompt_parts.append(f"SQL Compilations/sec: {metrics['avg_compilations_per_sec']}")
-                if 'avg_lock_waits_per_sec' in metrics:
-                    prompt_parts.append(f"Lock Waits/sec: {metrics['avg_lock_waits_per_sec']}")
-        
-        # Existing bottlenecks
-        if 'bottlenecks' in perfmon_data and perfmon_data['bottlenecks']:
-            bottleneck_list = []
-            for bottleneck in perfmon_data['bottlenecks']:
-                severity = bottleneck.get('severity', 'UNKNOWN')
-                category = bottleneck.get('category', 'Unknown')
-                description = bottleneck.get('description', 'No description')
-                bottleneck_list.append(f"{severity} {category}: {description}")
-            prompt_parts.append(f"Detected Bottlenecks: {'; '.join(bottleneck_list)}")
+        # Filter empty sections
+        prompt_parts = [p for p in prompt_parts if p]
         
         if not prompt_parts:
             prompt_parts.append("No significant performance metrics available in Performance Monitor data")
@@ -398,6 +359,73 @@ class AIService:
         prompt += "Provide JSON response with: {'bottlenecks': [{'component': 'CPU/Memory/Disk/SQL', 'severity': 'CRITICAL/WARNING/INFO', 'root_cause': 'analysis', 'recommendation': 'specific action', 'priority': 1-10}], 'correlation_analysis': 'cross-component analysis', 'summary': 'overall assessment'}"
         
         return prompt
+    
+    def _format_perfmon_collection_section(self, perfmon_data: Dict[str, Any]) -> str:
+        """Format collection metadata section of PerfMon prompt"""
+        summary = perfmon_data.get('summary', {})
+        if not summary:
+            return ""
+        return f"Collection: {summary.get('duration_minutes', 0):.1f} minutes, {summary.get('total_counters', 0)} counters"
+    
+    def _format_perfmon_resource_sections(self, perfmon_data: Dict[str, Any]) -> str:
+        """Format CPU, memory, disk, and SQL Server resource sections"""
+        sections = []
+        
+        # CPU metrics
+        cpu = perfmon_data.get('cpu_analysis', {})
+        if 'metrics' in cpu:
+            metrics = cpu['metrics']
+            status = cpu.get('status', 'OK')
+            if 'avg_processor_time' in metrics:
+                sections.append(f"CPU: {metrics['avg_processor_time']}% avg usage ({status})")
+            if 'avg_processor_queue' in metrics:
+                sections.append(f"CPU Queue: {metrics['avg_processor_queue']} avg length")
+        
+        # Memory metrics
+        memory = perfmon_data.get('memory_analysis', {})
+        if 'metrics' in memory:
+            metrics = memory['metrics']
+            status = memory.get('status', 'OK')
+            if 'avg_available_mb' in metrics:
+                sections.append(f"Memory: {metrics['avg_available_mb']:,.0f} MB avg available ({status})")
+            if 'avg_page_life_expectancy' in metrics:
+                sections.append(f"Page Life Expectancy: {metrics['avg_page_life_expectancy']:,.0f} seconds")
+        
+        # Disk metrics
+        disk = perfmon_data.get('disk_analysis', {})
+        if 'metrics' in disk:
+            metrics = disk['metrics']
+            status = disk.get('status', 'OK')
+            if 'avg_disk_queue_length' in metrics:
+                sections.append(f"Disk Queue: {metrics['avg_disk_queue_length']} avg length ({status})")
+            if 'avg_disk_read_ms' in metrics:
+                sections.append(f"Disk Latency: {metrics['avg_disk_read_ms']} ms avg read")
+        
+        # SQL Server metrics
+        sql = perfmon_data.get('sql_server_analysis', {})
+        if 'metrics' in sql:
+            metrics = sql['metrics']
+            status = sql.get('status', 'OK')
+            if 'avg_batch_requests_per_sec' in metrics:
+                sections.append(f"SQL Batches/sec: {metrics['avg_batch_requests_per_sec']} ({status})")
+            if 'avg_compilations_per_sec' in metrics:
+                sections.append(f"SQL Compilations/sec: {metrics['avg_compilations_per_sec']}")
+            if 'avg_lock_waits_per_sec' in metrics:
+                sections.append(f"Lock Waits/sec: {metrics['avg_lock_waits_per_sec']}")
+        
+        return "\n".join(sections)
+    
+    def _format_perfmon_bottlenecks_section(self, perfmon_data: Dict[str, Any]) -> str:
+        """Format detected bottlenecks section of PerfMon prompt"""
+        if not perfmon_data.get('bottlenecks'):
+            return ""
+        bottleneck_list = []
+        for bottleneck in perfmon_data['bottlenecks']:
+            severity = bottleneck.get('severity', 'UNKNOWN')
+            category = bottleneck.get('category', 'Unknown')
+            description = bottleneck.get('description', 'No description')
+            bottleneck_list.append(f"{severity} {category}: {description}")
+        return f"Detected Bottlenecks: {'; '.join(bottleneck_list)}"
 
     def analyze_log_entries(self, log_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze log entries using Azure OpenAI
@@ -460,69 +488,14 @@ class AIService:
         """
         prompt_parts = []
         
-        # Analysis period and scope
-        if 'summary' in log_data:
-            summary = log_data['summary']
-            prompt_parts.append(f"Analysis Period: {summary.get('analysis_period_days', 7)} days")
-            prompt_parts.append(f"SQL Server Entries: {summary.get('total_sql_entries', 0):,}")
-            prompt_parts.append(f"Critical SQL Errors: {summary.get('critical_sql_errors', 0):,}")
-            prompt_parts.append(f"Windows Events: {summary.get('total_windows_events', 0):,}")
+        # Build sections
+        prompt_parts.append(self._format_log_summary_section(log_data))
+        prompt_parts.append(self._format_sql_server_errors_section(log_data))
+        prompt_parts.append(self._format_windows_events_section(log_data))
+        prompt_parts.append(self._format_log_recommendations_section(log_data))
         
-        # SQL Server error analysis
-        if 'sql_server_errors' in log_data:
-            sql_errors = log_data['sql_server_errors']
-            
-            # Critical errors
-            critical_errors = sql_errors.get('critical_errors', [])
-            if critical_errors:
-                prompt_parts.append(f"\nCritical SQL Server Errors ({len(critical_errors)} found):")
-                for error in critical_errors[:5]:  # Limit to first 5 for prompt space
-                    severity = error.get('severity', 0)
-                    error_num = error.get('error_number', 0)
-                    text = error.get('text', '')[:200]  # Truncate for prompt
-                    prompt_parts.append(f"- Severity {severity}, Error {error_num}: {text}")
-            
-            # Performance issues
-            performance_issues = sql_errors.get('performance_issues', {})
-            if performance_issues:
-                prompt_parts.append("\nPerformance Issues Detected:")
-                for issue_type, issues in performance_issues.items():
-                    if issues:
-                        prompt_parts.append(f"- {issue_type.replace('_', ' ').title()}: {len(issues)} occurrences")
-                        # Include sample of most recent issue
-                        latest = max(issues, key=lambda x: x.get('log_date', datetime.min))
-                        sample_text = latest.get('text', '')[:150]
-                        prompt_parts.append(f"  Sample: {sample_text}")
-            
-            # Severity breakdown
-            severity_breakdown = sql_errors.get('severity_breakdown', {})
-            if severity_breakdown:
-                prompt_parts.append("\nSeverity Breakdown:")
-                for severity, count in severity_breakdown.items():
-                    prompt_parts.append(f"- {severity}: {count} occurrences")
-        
-        # Windows event analysis
-        if 'windows_events' in log_data:
-            windows_events = log_data['windows_events']
-            categorized = windows_events.get('categorized_events', {})
-            
-            if categorized:
-                prompt_parts.append("\nWindows Event Log Issues:")
-                for category, events in categorized.items():
-                    if events:
-                        prompt_parts.append(f"- {category.replace('_', ' ').title()}: {len(events)} events")
-                        # Include sample event message
-                        sample_event = events[0]
-                        sample_message = sample_event.get('Message', '')[:100]
-                        prompt_parts.append(f"  Sample: {sample_message}")
-        
-        # Existing recommendations
-        if 'recommendations' in log_data:
-            recommendations = log_data['recommendations']
-            if recommendations:
-                prompt_parts.append(f"\nCurrent Recommendations ({len(recommendations)}):")
-                for rec in recommendations[:3]:  # First 3 recommendations
-                    prompt_parts.append(f"- {rec}")
+        # Filter empty sections
+        prompt_parts = [p for p in prompt_parts if p]
         
         if not prompt_parts:
             prompt_parts.append("No significant log issues detected in the analysis period")
@@ -537,6 +510,81 @@ class AIService:
         prompt += "Provide JSON response with: {'critical_findings': [{'issue': 'description', 'severity': 'CRITICAL/HIGH/MEDIUM/LOW', 'root_cause': 'analysis', 'remediation': 'specific steps', 'priority': 1-10, 'prevention': 'preventive measures'}], 'correlation_analysis': 'relationship between different log entries', 'risk_assessment': 'overall risk evaluation', 'summary': 'executive summary'}"
         
         return prompt
+    
+    def _format_log_summary_section(self, log_data: Dict[str, Any]) -> str:
+        """Format analysis period and scope summary section"""
+        summary = log_data.get('summary', {})
+        if not summary:
+            return ""
+        sections = [
+            f"Analysis Period: {summary.get('analysis_period_days', 7)} days",
+            f"SQL Server Entries: {summary.get('total_sql_entries', 0):,}",
+            f"Critical SQL Errors: {summary.get('critical_sql_errors', 0):,}",
+            f"Windows Events: {summary.get('total_windows_events', 0):,}"
+        ]
+        return "\n".join(sections)
+    
+    def _format_sql_server_errors_section(self, log_data: Dict[str, Any]) -> str:
+        """Format SQL Server error analysis section"""
+        sql_errors = log_data.get('sql_server_errors', {})
+        if not sql_errors:
+            return ""
+        sections = []
+        
+        # Critical errors
+        critical_errors = sql_errors.get('critical_errors', [])
+        if critical_errors:
+            sections.append(f"\nCritical SQL Server Errors ({len(critical_errors)} found):")
+            for error in critical_errors[:5]:
+                severity = error.get('severity', 0)
+                error_num = error.get('error_number', 0)
+                text = error.get('text', '')[:200]
+                sections.append(f"- Severity {severity}, Error {error_num}: {text}")
+        
+        # Performance issues
+        performance_issues = sql_errors.get('performance_issues', {})
+        if performance_issues:
+            sections.append("\nPerformance Issues Detected:")
+            for issue_type, issues in performance_issues.items():
+                if issues:
+                    sections.append(f"- {issue_type.replace('_', ' ').title()}: {len(issues)} occurrences")
+                    latest = max(issues, key=lambda x: x.get('log_date', datetime.min))
+                    sample_text = latest.get('text', '')[:150]
+                    sections.append(f"  Sample: {sample_text}")
+        
+        # Severity breakdown
+        severity_breakdown = sql_errors.get('severity_breakdown', {})
+        if severity_breakdown:
+            sections.append("\nSeverity Breakdown:")
+            for severity, count in severity_breakdown.items():
+                sections.append(f"- {severity}: {count} occurrences")
+        
+        return "\n".join(sections)
+    
+    def _format_windows_events_section(self, log_data: Dict[str, Any]) -> str:
+        """Format Windows event log analysis section"""
+        windows_events = log_data.get('windows_events', {})
+        categorized = windows_events.get('categorized_events', {})
+        if not categorized:
+            return ""
+        sections = ["\nWindows Event Log Issues:"]
+        for category, events in categorized.items():
+            if events:
+                sections.append(f"- {category.replace('_', ' ').title()}: {len(events)} events")
+                sample_event = events[0]
+                sample_message = sample_event.get('Message', '')[:100]
+                sections.append(f"  Sample: {sample_message}")
+        return "\n".join(sections)
+    
+    def _format_log_recommendations_section(self, log_data: Dict[str, Any]) -> str:
+        """Format existing recommendations section"""
+        recommendations = log_data.get('recommendations', [])
+        if not recommendations:
+            return ""
+        sections = [f"\nCurrent Recommendations ({len(recommendations)}):"]
+        for rec in recommendations[:3]:
+            sections.append(f"- {rec}")
+        return "\n".join(sections)
 
     def _extract_recommendations_from_text(self, text: str) -> List[str]:
         """Extract recommendations from AI response text

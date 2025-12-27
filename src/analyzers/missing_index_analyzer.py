@@ -7,7 +7,12 @@ Based on SQL Server DMVs and best practices from SQL experts
 import logging
 from typing import Dict, Any, List, Optional
 
-class MissingIndexAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class MissingIndexAnalyzer(BaseAnalyzer):
     """Analyzes missing indexes using SQL Server DMVs"""
     
     def __init__(self, connection, config):
@@ -17,9 +22,7 @@ class MissingIndexAnalyzer:
             connection: SQLServerConnection instance
             config: ConfigManager instance
         """
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
     
     def _get_user_databases(self) -> List[str]:
         """Get list of user databases (excluding system databases)"""

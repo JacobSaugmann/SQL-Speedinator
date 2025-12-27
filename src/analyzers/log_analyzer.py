@@ -19,8 +19,12 @@ import subprocess
 import json
 from pathlib import Path
 
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
 
-class LogAnalyzer:
+class LogAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server error logs and Windows event logs for performance issues"""
     
     def __init__(self, sql_connection, config):
@@ -30,9 +34,7 @@ class LogAnalyzer:
             sql_connection: Active SQL Server connection
             config: Configuration object
         """
-        self.connection = sql_connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(sql_connection, config)
         
         # Performance-related keywords to search for
         self.performance_keywords = {
@@ -78,6 +80,10 @@ class LogAnalyzer:
             24: 'FATAL ERROR: HARDWARE ERROR',
             25: 'FATAL ERROR: SYSTEM ERROR'
         }
+
+    def analyze(self) -> Dict[str, Any]:
+        """Implement BaseAnalyzer interface by calling analyze_logs()"""
+        return self.analyze_logs()
 
     def analyze_logs(self) -> Dict[str, Any]:
         """Perform comprehensive log analysis

@@ -8,7 +8,12 @@ import logging
 from typing import Dict, Any, List, Optional
 from src.core.sql_version_manager import SQLVersionManager
 
-class PlanCacheAnalyzer:
+try:
+    from ..core.base_analyzer import BaseAnalyzer
+except ImportError:
+    from src.core.base_analyzer import BaseAnalyzer
+
+class PlanCacheAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server plan cache for performance bottlenecks"""
     
     def __init__(self, connection, config):
@@ -18,9 +23,7 @@ class PlanCacheAnalyzer:
             connection: SQLServerConnection instance
             config: ConfigManager instance
         """
-        self.connection = connection
-        self.config = config
-        self.logger = logging.getLogger(__name__)
+        super().__init__(connection, config)
         self.version_manager = SQLVersionManager(connection)
     
     def analyze(self) -> Dict[str, Any]:

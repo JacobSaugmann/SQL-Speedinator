@@ -215,8 +215,16 @@ Examples:
     
     return 0
 
-def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis=False, perfmon_file=None, perfmon_duration=240):
-    """Run a single analysis"""
+def _setup_perfmon_collection(perfmon_duration, config):
+    """Setup and run Performance Monitor data collection
+    
+    Args:
+        perfmon_duration: Duration in minutes for collection
+        config: Configuration manager
+        
+    Returns:
+        Tuple of (perfmon_results, collection_name)
+    """
     logger = logging.getLogger(__name__)
     
     def simple_print(message):
@@ -224,15 +232,253 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
         if not VERBOSE_MODE:
             print(message)
     
-    # Enable AI analysis if requested via command line
+    perfmon_results = None
+    collection_name = None
+    
+    try:
+        from src.perfmon.template_manager import PerfMonTemplateManager
+        from pathlib import Path
+        import time
+        
+        template_manager = PerfMonTemplateManager(config)
+        template_file = Path(__file__).parent / "perfmon" / "templates" / "sql_performance_template.xml"
+        
+        if not template_file.exists():
+            logger.warning(f"PerfMon template not found: {template_file}")
+            return None, None
+        
+        template_info = template_manager.parse_template(template_file)
+        if not template_info:
+            logger.warning("Failed to parse PerfMon template")
+            return None, None
+        
+        # Create unique collection name
+        collection_name = f"SQLSpeedinator_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        matching_collection = template_manager.find_matching_collection(template_info['counters'])
+        
+        if matching_collection and isinstance(matching_collection, dict):
+            logger.info(f"Found compatible existing collection: {matching_collection.get('name', 'Unknown')}")
+            collection_name = matching_collection.get('name', collection_name)
+            xml_path = matching_collection.get('xml_path', '')
+            dcs_file = Path(xml_path) if xml_path else None
+        else:
+            # Create new data collector set
+            dcs_file_path = template_manager.create_data_collector_set(template_info, collection_name)
+            dcs_file = Path(dcs_file_path) if dcs_file_path else None
+            
+            if not dcs_file_path or not dcs_file or not dcs_file.exists():
+                logger.warning("Failed to create data collector set")
+                return None, None
+            
+            logger.info(f"Data collector set created: {dcs_file}")
+        
+        # Start data collection
+        duration_hours = perfmon_duration / 60
+        collection_result = template_manager.start_data_collection(str(dcs_file), duration_hours=duration_hours)
+        
+        if not collection_result.get('success', False):
+            logger.warning("Failed to start automatic Performance Monitor collection")
+            return None, None
+        
+        logger.info(f"Performance Monitor collection '{collection_name}' started successfully")
+        simple_print(f"🔄 Collecting Performance Monitor data for {perfmon_duration} minutes...")
+        
+        # Wait for collection with progress bar
+        wait_seconds = perfmon_duration * 60
+        start_time = time.time()
+        
+        while time.time() - start_time < wait_seconds:
+            elapsed = int(time.time() - start_time)
+            remaining = int(wait_seconds - elapsed)
+            progress_percent = (elapsed / wait_seconds) * 100
+            
+            bar_width = 50
+            filled_length = int(bar_width * elapsed // wait_seconds)
+            bar = '█' * filled_length + '░' * (bar_width - filled_length)
+            
+            minutes_remaining = remaining // 60
+            seconds_remaining = remaining % 60
+            
+            import sys
+            sys.stdout.write(f'\r[{bar}] {progress_percent:5.1f}% - {minutes_remaining:02d}m {seconds_remaining:02d}s remaining')
+            sys.stdout.flush()
+            
+            time.sleep(1)
+        
+        print(f"\n✅ Data collection completed!")
+        logger.info("Stopping data collection...")
+        
+        # Stop collection
+        stop_success = template_manager.stop_data_collection(collection_result)
+        if not stop_success:
+            logger.warning("Failed to stop data collection cleanly")
+            return None, collection_name
+        
+        logger.info("Data collection stopped successfully")
+        
+        # Get the data file
+        perfmon_data_file = collection_result.get('output_file')
+        
+        if not perfmon_data_file or not Path(perfmon_data_file).exists():
+            potential_paths = [
+                Path(f"C:/PerfLogs/{collection_name}.blg"),
+                Path(f"C:/PerfLogs/Admin/{collection_name}.blg"),
+                Path(__file__).parent / "perfmon" / "data" / f"{collection_name}.blg"
+            ]
+            
+            for path in potential_paths:
+                if path.exists():
+                    perfmon_data_file = str(path)
+                    logger.info(f"Found performance data: {perfmon_data_file}")
+                    break
+        
+        if perfmon_data_file and Path(perfmon_data_file).exists():
+            from src.perfmon.performance_analyzer import PerformanceCounterAnalyzer
+            perfmon_analyzer = PerformanceCounterAnalyzer(config)
+            perfmon_results = perfmon_analyzer.analyze_performance_log(perfmon_data_file)
+            
+            if perfmon_results and not perfmon_results.get('error'):
+                logger.info("Performance Monitor analysis completed successfully")
+            else:
+                logger.warning(f"PerfMon analysis failed: {perfmon_results.get('error', 'Unknown error')}")
+                perfmon_results = None
+        else:
+            logger.warning("Could not find generated performance data file")
+            
+    except Exception as e:
+        logger.error(f"PerfMon collection failed: {e}")
+    
+    return perfmon_results, collection_name
+
+
+def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_results):
+    """Run main SQL Server analysis and AI analysis if enabled
+    
+    Args:
+        server_name: SQL Server instance name
+        config: Configuration manager
+        night_mode: Whether to run in night mode
+        ai_analysis: Whether to run AI analysis
+        perfmon_results: Performance Monitor data (if available)
+        
+    Returns:
+        Dictionary of analysis results
+    """
+    logger = logging.getLogger(__name__)
+    
+    def simple_print(message):
+        """Print simple message only in non-verbose mode"""
+        if not VERBOSE_MODE:
+            print(message)
+    
+    logger.info("Establishing SQL Server connection...")
+    simple_print(f"🔗 Connecting to SQL Server: {server_name}")
+    
+    with SQLServerConnection(server_name, config) as conn:
+        if not conn.test_connection():
+            raise Exception("Failed to connect to SQL Server")
+        
+        logger.info("Connection established successfully")
+        simple_print("✅ Connection established")
+        
+        # Run SQL analysis
+        logger.info("Starting performance analysis...")
+        simple_print("🔍 Running SQL Server performance analysis...")
+        analyzer = PerformanceAnalyzer(conn, config, night_mode)
+        analysis_results = analyzer.run_full_analysis()
+        simple_print("✅ Performance analysis completed")
+        
+        # Add PerfMon results if available
+        if perfmon_results:
+            analysis_results['perfmon_analysis'] = perfmon_results
+            
+            if ai_analysis:
+                logger.info("Running AI analysis on Performance Monitor data...")
+                simple_print("🧠 Running AI analysis on Performance Monitor data...")
+                from src.services.ai_service import AIService
+                ai_service = AIService(config)
+                perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
+                
+                if perfmon_ai_analysis:
+                    analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
+                    logger.info("AI Performance Monitor analysis completed")
+                    simple_print("✅ AI Performance Monitor analysis completed")
+        
+        # Run AI analysis on log data if enabled
+        if ai_analysis and 'log_analysis' in analysis_results:
+            logger.info("Running AI analysis on log data...")
+            from src.services.ai_service import AIService
+            ai_service = AIService(config)
+            log_ai_analysis = ai_service.analyze_log_entries(analysis_results['log_analysis'])
+            
+            if log_ai_analysis:
+                analysis_results['log_analysis']['ai_analysis'] = log_ai_analysis
+                logger.info("AI log analysis completed")
+        
+        return analysis_results
+
+
+def _generate_and_save_report(analysis_results, server_name, output_path, config):
+    """Generate and save PDF report
+    
+    Args:
+        analysis_results: Dictionary of analysis results
+        server_name: SQL Server instance name
+        output_path: Path for output report
+        config: Configuration manager
+        
+    Returns:
+        Path to generated report
+    """
+    logger = logging.getLogger(__name__)
+    
+    def simple_print(message):
+        """Print simple message only in non-verbose mode"""
+        if not VERBOSE_MODE:
+            print(message)
+    
+    logger.info("Generating PDF report...")
+    simple_print("📄 Generating PDF report...")
+    report_generator = PDFReportGenerator(config)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"sql_analysis_{server_name}_{timestamp}.pdf"
+    output_file = output_path / filename
+    
+    report_path = report_generator.generate_report(
+        analysis_results, 
+        str(output_file), 
+        server_name
+    )
+    
+    logger.info(f"Analysis completed successfully!")
+    logger.info(f"Report saved to: {report_path}")
+    simple_print(f"✅ Analysis completed!")
+    simple_print(f"📋 Report saved to: {report_path}")
+    
+    return report_path
+
+
+def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis=False, perfmon_file=None, perfmon_duration=240):
+    """Run a single analysis - orchestrator method
+    
+    Coordinates PerfMon collection, SQL analysis, and report generation.
+    """
+    logger = logging.getLogger(__name__)
+    
+    def simple_print(message):
+        """Print simple message only in non-verbose mode"""
+        if not VERBOSE_MODE:
+            print(message)
+    
+    # Enable AI analysis if requested
     if ai_analysis:
-        # Temporarily override the AI_ANALYSIS_ENABLED setting
         import os
         os.environ['AI_ANALYSIS_ENABLED'] = 'true'
         logger.info("AI analysis enabled via command line flag")
         simple_print("🧠 AI Analysis: Enabled")
     
-    # Initialize PerfMon analysis if requested
+    # Handle PerfMon analysis
     perfmon_results = None
     if perfmon_file:
         logger.info(f"Analyzing Performance Monitor data from: {perfmon_file}")
@@ -248,213 +494,14 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
             logger.info("Performance Monitor analysis completed successfully")
             simple_print("✅ Performance Monitor analysis completed")
     elif perfmon_duration and perfmon_duration > 0:
-        # Start automatic PerfMon data collection if no file provided but duration specified
         logger.info(f"Starting automatic Performance Monitor data collection for {perfmon_duration} minutes...")
-        simple_print(f"📊 Starting Performance Monitor data collection ({perfmon_duration} minutes)...")
-        perfmon_data_file = None
-        collection_name = None
-        
-        try:
-            from src.perfmon.template_manager import PerfMonTemplateManager
-            from pathlib import Path
-            import time
-            
-            template_manager = PerfMonTemplateManager(config)
-            template_file = Path(__file__).parent / "perfmon" / "templates" / "sql_performance_template.xml"
-            
-            if template_file.exists():
-                # Create unique collection name
-                collection_name = f"SQLSpeedinator_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                template_info = template_manager.parse_template(template_file)
-                
-                if template_info:
-                    # Check for existing compatible collection first
-                    matching_collection = template_manager.find_matching_collection(template_info['counters'])
-                    
-                    if matching_collection and isinstance(matching_collection, dict):
-                        logger.info(f"Found compatible existing collection: {matching_collection.get('name', 'Unknown')}")
-                        collection_name = matching_collection.get('name', collection_name)
-                        xml_path = matching_collection.get('xml_path', '')
-                        dcs_file = Path(xml_path) if xml_path else None
-                    else:
-                        # Create new data collector set
-                        dcs_file_path = template_manager.create_data_collector_set(template_info, collection_name)
-                        dcs_file = Path(dcs_file_path) if dcs_file_path else None
-                        
-                        if not dcs_file_path:
-                            logger.warning("Failed to create data collector set - no file path returned")
-                        elif not dcs_file or not dcs_file.exists():
-                            logger.warning(f"Data collector set file not found: {dcs_file}")
-                        else:
-                            logger.info(f"Data collector set created: {dcs_file}")
-                    
-                    if dcs_file and dcs_file.exists():
-                        # Start data collection
-                        duration_hours = perfmon_duration / 60  # Convert minutes to hours
-                        collection_result = template_manager.start_data_collection(str(dcs_file), duration_hours=duration_hours)
-                        collection_started = collection_result.get('success', False)
-                        
-                        if collection_started:
-                            logger.info(f"Performance Monitor collection '{collection_name}' started successfully")
-                            logger.info(f"Waiting {perfmon_duration} minutes for data collection...")
-                            
-                            # **WAIT FOR DATA COLLECTION TO COMPLETE**
-                            wait_seconds = perfmon_duration * 60
-                            start_time = time.time()
-                            
-                            # Show progress bar while waiting
-                            import sys
-                            print(f"\n🔄 Collecting Performance Monitor data for {perfmon_duration} minutes...")
-                            
-                            while time.time() - start_time < wait_seconds:
-                                elapsed = int(time.time() - start_time)
-                                remaining = int(wait_seconds - elapsed)
-                                progress_percent = (elapsed / wait_seconds) * 100
-                                
-                                # Create progress bar
-                                bar_width = 50
-                                filled_length = int(bar_width * elapsed // wait_seconds)
-                                bar = '█' * filled_length + '░' * (bar_width - filled_length)
-                                
-                                # Format time remaining
-                                minutes_remaining = remaining // 60
-                                seconds_remaining = remaining % 60
-                                
-                                # Clear line and show progress
-                                sys.stdout.write(f'\r[{bar}] {progress_percent:5.1f}% - {minutes_remaining:02d}m {seconds_remaining:02d}s remaining')
-                                sys.stdout.flush()
-                                
-                                time.sleep(1)  # Update every second for smooth progress
-                            
-                            print(f"\n✅ Data collection completed!")
-                            logger.info("Stopping data collection...")
-                            
-                            # Stop collection - pass the full collection result
-                            stop_success = template_manager.stop_data_collection(collection_result)
-                            if stop_success:
-                                logger.info("Data collection stopped successfully")
-                                
-                                # Get the data file from collection result
-                                perfmon_data_file = collection_result.get('output_file')
-                                
-                                # If not in collection result, search for it
-                                if not perfmon_data_file or not Path(perfmon_data_file).exists():
-                                    potential_paths = [
-                                        Path(f"C:/PerfLogs/{collection_name}.blg"),
-                                        Path(f"C:/PerfLogs/Admin/{collection_name}.blg"),
-                                        Path(__file__).parent / "perfmon" / "data" / f"{collection_name}.blg"
-                                    ]
-                                    
-                                    for path in potential_paths:
-                                        if path.exists():
-                                            perfmon_data_file = str(path)
-                                            logger.info(f"Found performance data: {perfmon_data_file}")
-                                            break
-                                
-                                if perfmon_data_file and Path(perfmon_data_file).exists():
-                                    # Analyze the collected data
-                                    from src.perfmon.performance_analyzer import PerformanceCounterAnalyzer
-                                    perfmon_analyzer = PerformanceCounterAnalyzer(config)
-                                    perfmon_results = perfmon_analyzer.analyze_performance_log(perfmon_data_file)
-                                    
-                                    if perfmon_results and not perfmon_results.get('error'):
-                                        logger.info("Performance Monitor analysis completed successfully")
-                                    else:
-                                        logger.warning(f"PerfMon analysis failed: {perfmon_results.get('error', 'Unknown error')}")
-                                        perfmon_results = None
-                                else:
-                                    logger.warning("Could not find generated performance data file")
-                            else:
-                                logger.warning("Failed to stop data collection cleanly")
-                        else:
-                            logger.warning("Failed to start automatic Performance Monitor collection")
-                    else:
-                        logger.warning("Failed to create data collector set")
-                else:
-                    logger.warning("Failed to parse PerfMon template")
-            else:
-                logger.warning(f"PerfMon template not found: {template_file}")
-                
-        except Exception as e:
-            logger.error(f"PerfMon collection failed: {e}")
-            # Clean up if collection was started
-            if collection_name:
-                try:
-                    template_manager.stop_data_collection(collection_name)
-                except:
-                    pass
+        perfmon_results, _ = _setup_perfmon_collection(perfmon_duration, config)
     
-    # Create connection
-    logger.info("Establishing SQL Server connection...")
-    simple_print(f"🔗 Connecting to SQL Server: {server_name}")
-    with SQLServerConnection(server_name, config) as conn:
-        if not conn.test_connection():
-            raise Exception("Failed to connect to SQL Server")
-        
-        logger.info("Connection established successfully")
-        simple_print("✅ Connection established")
-        
-        # Initialize analyzer
-        analyzer = PerformanceAnalyzer(conn, config, night_mode)
-        
-        # Run analysis
-        logger.info("Starting performance analysis...")
-        simple_print("🔍 Running SQL Server performance analysis...")
-        analysis_results = analyzer.run_full_analysis()
-        simple_print("✅ Performance analysis completed")
-        
-        # Add PerfMon results to analysis if available
-        if perfmon_results:
-            analysis_results['perfmon_analysis'] = perfmon_results
-            
-            # Run AI analysis on PerfMon data if AI is enabled
-            if ai_analysis:
-                logger.info("Running AI analysis on Performance Monitor data...")
-                simple_print("🧠 Running AI analysis on Performance Monitor data...")
-                from src.services.ai_service import AIService
-                ai_service = AIService(config)
-                perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
-                
-                if perfmon_ai_analysis:
-                    analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
-                    logger.info("AI Performance Monitor analysis completed")
-                    simple_print("✅ AI Performance Monitor analysis completed")
-                else:
-                    logger.info("AI Performance Monitor analysis skipped or failed")
-        
-        # Run AI analysis on log data if AI is enabled and log analysis was performed
-        if ai_analysis and 'log_analysis' in analysis_results:
-            logger.info("Running AI analysis on log data...")
-            from src.services.ai_service import AIService
-            ai_service = AIService(config)
-            log_ai_analysis = ai_service.analyze_log_entries(analysis_results['log_analysis'])
-            
-            if log_ai_analysis:
-                analysis_results['log_analysis']['ai_analysis'] = log_ai_analysis
-                logger.info("AI log analysis completed")
-            else:
-                logger.info("AI log analysis skipped or failed")
-        
-        # Generate report
-        logger.info("Generating PDF report...")
-        simple_print("📄 Generating PDF report...")
-        report_generator = PDFReportGenerator(config)
-        
-        # Create output filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"sql_analysis_{server_name}_{timestamp}.pdf"
-        output_file = output_path / filename
-        
-        report_path = report_generator.generate_report(
-            analysis_results, 
-            str(output_file), 
-            server_name
-        )
-        
-        logger.info(f"Analysis completed successfully!")
-        logger.info(f"Report saved to: {report_path}")
-        simple_print(f"✅ Analysis completed!")
-        simple_print(f"📋 Report saved to: {report_path}")
+    # Run SQL analysis and AI analysis
+    analysis_results = _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_results)
+    
+    # Generate and save report
+    _generate_and_save_report(analysis_results, server_name, output_path, config)
 
 if __name__ == "__main__":
     sys.exit(main())
