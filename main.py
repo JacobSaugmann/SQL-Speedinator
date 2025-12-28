@@ -26,6 +26,7 @@ from src.reports.pdf_report_generator import PDFReportGenerator
 from src.core.config_manager import ConfigManager
 from src.core.scheduler import AnalysisScheduler
 from src.core.file_cleanup_manager import FileCleanupManager
+from src.core.error_formatter import UserFriendlyError
 
 # Global variable to track verbose mode
 VERBOSE_MODE = False
@@ -210,7 +211,13 @@ Examples:
         logger.info("Analysis interrupted by user")
         return 1
     except Exception as e:
+        # Log full technical error with stack trace
         logger.error(f"Analysis failed: {str(e)}", exc_info=True)
+        
+        # Display user-friendly error message (without emoji to avoid encoding issues)
+        user_message = UserFriendlyError.format_for_user(str(e))
+        print(f"\n[ERROR] {user_message}\n")
+        
         return 1
     
     return 0
@@ -346,7 +353,14 @@ def _setup_perfmon_collection(perfmon_duration, config):
             logger.warning("Could not find generated performance data file")
             
     except Exception as e:
-        logger.error(f"PerfMon collection failed: {e}")
+        # Log full technical error
+        logger.error(f"PerfMon collection failed: {str(e)}", exc_info=True)
+        
+        # Display user-friendly error message (without emoji to avoid encoding issues)
+        user_message = UserFriendlyError.log_and_display(
+            logger, e, context="Performance Monitor data collection"
+        )
+        simple_print(f"\n[WARNING] {user_message}\n")
     
     return perfmon_results, collection_name
 
@@ -374,48 +388,62 @@ def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_resu
     logger.info("Establishing SQL Server connection...")
     simple_print(f"🔗 Connecting to SQL Server: {server_name}")
     
-    with SQLServerConnection(server_name, config) as conn:
-        if not conn.test_connection():
-            raise Exception("Failed to connect to SQL Server")
-        
-        logger.info("Connection established successfully")
-        simple_print("✅ Connection established")
-        
-        # Run SQL analysis
-        logger.info("Starting performance analysis...")
-        simple_print("🔍 Running SQL Server performance analysis...")
-        analyzer = PerformanceAnalyzer(conn, config, night_mode)
-        analysis_results = analyzer.run_full_analysis()
-        simple_print("✅ Performance analysis completed")
-        
-        # Add PerfMon results if available
-        if perfmon_results:
-            analysis_results['perfmon_analysis'] = perfmon_results
+    try:
+        with SQLServerConnection(server_name, config) as conn:
+            if not conn.test_connection():
+                raise Exception("Failed to connect to SQL Server")
             
-            if ai_analysis:
-                logger.info("Running AI analysis on Performance Monitor data...")
-                simple_print("🧠 Running AI analysis on Performance Monitor data...")
+            logger.info("Connection established successfully")
+            simple_print("✅ Connection established")
+            
+            # Run SQL analysis
+            logger.info("Starting performance analysis...")
+            simple_print("🔍 Running SQL Server performance analysis...")
+            analyzer = PerformanceAnalyzer(conn, config, night_mode)
+            analysis_results = analyzer.run_full_analysis()
+            simple_print("✅ Performance analysis completed")
+            
+            # Add PerfMon results if available
+            if perfmon_results:
+                analysis_results['perfmon_analysis'] = perfmon_results
+                
+                if ai_analysis:
+                    logger.info("Running AI analysis on Performance Monitor data...")
+                    simple_print("🧠 Running AI analysis on Performance Monitor data...")
+                    from src.services.ai_service import AIService
+                    ai_service = AIService(config)
+                    perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
+                    
+                    if perfmon_ai_analysis:
+                        analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
+                        logger.info("AI Performance Monitor analysis completed")
+                        simple_print("✅ AI Performance Monitor analysis completed")
+            
+            # Run AI analysis on log data if enabled
+            if ai_analysis and 'log_analysis' in analysis_results:
+                logger.info("Running AI analysis on log data...")
                 from src.services.ai_service import AIService
                 ai_service = AIService(config)
-                perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
+                log_ai_analysis = ai_service.analyze_log_entries(analysis_results['log_analysis'])
                 
-                if perfmon_ai_analysis:
-                    analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
-                    logger.info("AI Performance Monitor analysis completed")
-                    simple_print("✅ AI Performance Monitor analysis completed")
-        
-        # Run AI analysis on log data if enabled
-        if ai_analysis and 'log_analysis' in analysis_results:
-            logger.info("Running AI analysis on log data...")
-            from src.services.ai_service import AIService
-            ai_service = AIService(config)
-            log_ai_analysis = ai_service.analyze_log_entries(analysis_results['log_analysis'])
+                if log_ai_analysis:
+                    analysis_results['log_analysis']['ai_analysis'] = log_ai_analysis
+                    logger.info("AI log analysis completed")
             
-            if log_ai_analysis:
-                analysis_results['log_analysis']['ai_analysis'] = log_ai_analysis
-                logger.info("AI log analysis completed")
+            return analysis_results
+            
+    except Exception as e:
+        # Log full technical details
+        logger.error(f"SQL Server analysis failed: {str(e)}", exc_info=True)
         
-        return analysis_results
+        # Display user-friendly error message (without emoji to avoid encoding issues)
+        user_message = UserFriendlyError.log_and_display(
+            logger, e, server_name, "SQL Server analysis"
+        )
+        simple_print(f"\n[ERROR] {user_message}\n")
+        
+        # Return empty results instead of re-raising
+        return {}
 
 
 def _generate_and_save_report(analysis_results, server_name, output_path, config):
@@ -500,8 +528,11 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
     # Run SQL analysis and AI analysis
     analysis_results = _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_results)
     
-    # Generate and save report
-    _generate_and_save_report(analysis_results, server_name, output_path, config)
+    # Only generate report if analysis succeeded
+    if analysis_results:
+        _generate_and_save_report(analysis_results, server_name, output_path, config)
+    else:
+        logger.warning("Analysis results are empty - skipping report generation")
 
 if __name__ == "__main__":
     sys.exit(main())
