@@ -55,14 +55,14 @@ class DiskAnalyzer(BaseAnalyzer):
         except DatabaseQueryError as e:
             self.logger.error(f"Database query error in disk analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Database query failed: {e}",
+                error=f"Database query failed: {e}",
                 error_type="database",
                 retry_available=True
             )
         except Exception as e:
             self.logger.error(f"Unexpected error in disk analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Disk analysis failed: {e}",
+                error=f"Disk analysis failed: {e}",
                 error_type="analysis"
             )
     

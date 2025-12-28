@@ -79,12 +79,18 @@ class CircuitBreaker:
                 self.logger.info(f"{self.name}: Entering HALF_OPEN state, testing recovery")
             else:
                 # Circuit is still open, fail fast
-                remaining = self.recovery_timeout - \
-                           (time.time() - self.last_failure_time)
-                raise AIServiceUnavailableError(
-                    f"Service unavailable. Retry in {int(remaining)}s",
-                    error_code="CIRCUIT_OPEN"
-                )
+                if self.last_failure_time:
+                    remaining = self.recovery_timeout - \
+                               (time.time() - self.last_failure_time)
+                    raise AIServiceUnavailableError(
+                        f"Service unavailable. Retry in {int(max(0, remaining))}s",
+                        error_code="CIRCUIT_OPEN"
+                    )
+                else:
+                    raise AIServiceUnavailableError(
+                        "Circuit breaker is open",
+                        error_code="CIRCUIT_OPEN"
+                    )
         
         try:
             # Call the function
