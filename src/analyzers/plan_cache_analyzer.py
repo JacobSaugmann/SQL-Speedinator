@@ -10,8 +10,12 @@ from src.core.sql_version_manager import SQLVersionManager
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import DatabaseQueryError
 
 class PlanCacheAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server plan cache for performance bottlenecks"""
@@ -26,11 +30,11 @@ class PlanCacheAnalyzer(BaseAnalyzer):
         super().__init__(connection, config)
         self.version_manager = SQLVersionManager(connection)
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete plan cache analysis
         
         Returns:
-            Dictionary containing plan cache analysis results
+            AnalysisResult containing plan cache analysis results
         """
         try:
             results = {
@@ -43,11 +47,22 @@ class PlanCacheAnalyzer(BaseAnalyzer):
                 'recommendations': self._generate_plan_cache_recommendations()
             }
             
-            return results
+            self.logger.info("Plan cache analysis completed successfully")
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in plan cache analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"Database query failed: {str(e)}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in plan cache analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Error in plan cache analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
     
     def _get_cache_overview(self) -> Optional[List[Dict[str, Any]]]:
         """Get overview of plan cache usage and statistics"""

@@ -9,8 +9,12 @@ from typing import Dict, Any, List, Optional
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import DatabaseQueryError
 
 class MissingIndexAnalyzer(BaseAnalyzer):
     """Analyzes missing indexes using SQL Server DMVs"""
@@ -38,11 +42,11 @@ class MissingIndexAnalyzer(BaseAnalyzer):
         result = self.connection.execute_query(query)
         return [row['name'] for row in result] if result else []
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete missing index analysis
         
         Returns:
-            Dictionary containing missing index analysis results
+            AnalysisResult containing missing index analysis results
         """
         try:
             results = {
@@ -52,11 +56,22 @@ class MissingIndexAnalyzer(BaseAnalyzer):
                 'recommendations': self._generate_missing_index_recommendations()
             }
             
-            return results
+            self.logger.info("Missing index analysis completed successfully")
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in missing index analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"Database query failed: {str(e)}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error in missing index analysis: {e}")
-            return {'error': str(e)}
+            self.logger.error(f"Error in missing index analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
     
     def _get_missing_indexes(self) -> Optional[List[Dict[str, Any]]]:
         """Get missing index suggestions from SQL Server DMVs"""

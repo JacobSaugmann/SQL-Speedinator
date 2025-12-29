@@ -82,11 +82,28 @@ class TestPerformanceAnalyzer:
     
     def test_init_without_night_mode(self, mock_connection, mock_config):
         """Test initialization with default night_mode=False"""
+        # Create mock factory functions to avoid InvalidSpecError
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
             assert analyzer.night_mode is False
     
@@ -99,11 +116,28 @@ class TestPerformanceAnalyzer:
         }
         mock_connection.get_server_info.return_value = [expected_info]
         
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
             result = analyzer._get_server_info()
         
@@ -114,11 +148,28 @@ class TestPerformanceAnalyzer:
         """Test server info retrieval with empty result"""
         mock_connection.get_server_info.return_value = []
         
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
             result = analyzer._get_server_info()
         
@@ -128,11 +179,28 @@ class TestPerformanceAnalyzer:
         """Test server info retrieval with exception"""
         mock_connection.get_server_info.side_effect = Exception("Connection error")
         
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
             result = analyzer._get_server_info()
         
@@ -140,11 +208,28 @@ class TestPerformanceAnalyzer:
     
     def test_get_wait_recommendation(self, mock_connection, mock_config):
         """Test wait type recommendation mapping"""
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
         
         # Test known wait types
@@ -163,11 +248,28 @@ class TestPerformanceAnalyzer:
     
     def test_analyze_advanced_indexes_success(self, mock_connection, mock_config):
         """Test successful advanced index analysis"""
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
         
@@ -229,11 +331,28 @@ class TestPerformanceAnalyzer:
     
     def test_analyze_advanced_indexes_exception(self, mock_connection, mock_config):
         """Test advanced index analysis with exception"""
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
         
@@ -248,11 +367,28 @@ class TestPerformanceAnalyzer:
     
     def test_update_metadata_success(self, mock_connection, mock_config):
         """Test successful metadata update"""
+        # Create mock factory functions
+        mock_instances = {}
+        def create_mock(name):
+            def factory(*args, **kwargs):
+                if name not in mock_instances:
+                    mock_instances[name] = Mock()
+                return mock_instances[name]
+            return factory
+        
         with patch.multiple('src.core.performance_analyzer',
-                           DiskAnalyzer=Mock, IndexAnalyzer=Mock, AdvancedIndexAnalyzer=Mock,
-                           ServerConfigAnalyzer=Mock, TempDBAnalyzer=Mock, PlanCacheAnalyzer=Mock,
-                           WaitStatsAnalyzer=Mock, MissingIndexAnalyzer=Mock, ServerDatabaseAnalyzer=Mock,
-                           LogAnalyzer=Mock, AIAnalyzer=Mock, IntelligentRecommendationsEngine=Mock):
+                           DiskAnalyzer=create_mock('disk'),
+                           IndexAnalyzer=create_mock('index'),
+                           AdvancedIndexAnalyzer=create_mock('advanced_index'),
+                           ServerConfigAnalyzer=create_mock('server_config'),
+                           TempDBAnalyzer=create_mock('tempdb'),
+                           PlanCacheAnalyzer=create_mock('plan_cache'),
+                           WaitStatsAnalyzer=create_mock('wait_stats'),
+                           MissingIndexAnalyzer=create_mock('missing_index'),
+                           ServerDatabaseAnalyzer=create_mock('server_db'),
+                           LogAnalyzer=create_mock('log'),
+                           AIAnalyzer=create_mock('ai'),
+                           IntelligentRecommendationsEngine=create_mock('intelligent')):
             
             analyzer = PerformanceAnalyzer(mock_connection, mock_config)
         

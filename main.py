@@ -22,6 +22,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from src.core.sql_connection import SQLServerConnection
 from src.core.performance_analyzer import PerformanceAnalyzer
+from src.core.result_wrapper import AnalysisResult
 from src.reports.pdf_report_generator import PDFReportGenerator
 from src.core.config_manager import ConfigManager
 from src.core.scheduler import AnalysisScheduler
@@ -68,6 +69,7 @@ def setup_logging(night_mode=False, verbose=False):
     root_logger.handlers.clear()  # Clear any existing handlers
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
+
 
 def main():
     """Main function"""
@@ -174,7 +176,7 @@ Examples:
         if not args.disable_cleanup:
             logger.info("Performing automatic file cleanup...")
             if not VERBOSE_MODE:
-                print("🧹 Performing file cleanup...")
+                print("Performing file cleanup...")
             cleanup_manager = FileCleanupManager(config)
             
             # Configure cleanup settings based on command line args
@@ -189,7 +191,7 @@ Examples:
             else:
                 cleanup_results = cleanup_manager.cleanup_old_files()
         else:
-            logger.info("🚫 File cleanup disabled by command line flag")
+            logger.info("File cleanup disabled by command line flag")
         
         # Create output directory
         output_path = Path(args.output)
@@ -204,7 +206,7 @@ Examples:
             # Run single analysis
             logger.info(f"Starting SQL Server analysis for: {args.server}")
             if not VERBOSE_MODE:
-                print(f"🚀 Starting SQL Server analysis for: {args.server}")
+                print(f"Starting SQL Server analysis for: {args.server}")
             run_analysis(args.server, output_path, config, args.night_mode, args.ai_analysis, args.perfmon_file, args.perfmon_duration)
             
     except KeyboardInterrupt:
@@ -288,7 +290,7 @@ def _setup_perfmon_collection(perfmon_duration, config):
             return None, None
         
         logger.info(f"Performance Monitor collection '{collection_name}' started successfully")
-        simple_print(f"🔄 Collecting Performance Monitor data for {perfmon_duration} minutes...")
+        simple_print(f"Collecting Performance Monitor data for {perfmon_duration} minutes...")
         
         # Wait for collection with progress bar
         wait_seconds = perfmon_duration * 60
@@ -312,7 +314,7 @@ def _setup_perfmon_collection(perfmon_duration, config):
             
             time.sleep(1)
         
-        print(f"\n✅ Data collection completed!")
+        print(f"\nData collection completed!")
         logger.info("Stopping data collection...")
         
         # Stop collection
@@ -386,7 +388,7 @@ def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_resu
             print(message)
     
     logger.info("Establishing SQL Server connection...")
-    simple_print(f"🔗 Connecting to SQL Server: {server_name}")
+    simple_print(f"Connecting to SQL Server: {server_name}")
     
     try:
         with SQLServerConnection(server_name, config) as conn:
@@ -394,14 +396,14 @@ def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_resu
                 raise Exception("Failed to connect to SQL Server")
             
             logger.info("Connection established successfully")
-            simple_print("✅ Connection established")
+            simple_print("Connection established")
             
             # Run SQL analysis
             logger.info("Starting performance analysis...")
-            simple_print("🔍 Running SQL Server performance analysis...")
+            simple_print("Running SQL Server performance analysis...")
             analyzer = PerformanceAnalyzer(conn, config, night_mode)
             analysis_results = analyzer.run_full_analysis()
-            simple_print("✅ Performance analysis completed")
+            simple_print("Performance analysis completed")
             
             # Add PerfMon results if available
             if perfmon_results:
@@ -409,7 +411,7 @@ def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_resu
                 
                 if ai_analysis:
                     logger.info("Running AI analysis on Performance Monitor data...")
-                    simple_print("🧠 Running AI analysis on Performance Monitor data...")
+                    simple_print("Running AI analysis on Performance Monitor data...")
                     from src.services.ai_service import AIService
                     ai_service = AIService(config)
                     perfmon_ai_analysis = ai_service.analyze_perfmon_bottlenecks(perfmon_results)
@@ -417,7 +419,7 @@ def _run_sql_analysis(server_name, config, night_mode, ai_analysis, perfmon_resu
                     if perfmon_ai_analysis:
                         analysis_results['perfmon_analysis']['ai_analysis'] = perfmon_ai_analysis
                         logger.info("AI Performance Monitor analysis completed")
-                        simple_print("✅ AI Performance Monitor analysis completed")
+                        simple_print("AI Performance Monitor analysis completed")
             
             # Run AI analysis on log data if enabled
             if ai_analysis and 'log_analysis' in analysis_results:
@@ -466,7 +468,7 @@ def _generate_and_save_report(analysis_results, server_name, output_path, config
             print(message)
     
     logger.info("Generating PDF report...")
-    simple_print("📄 Generating PDF report...")
+    simple_print("Generating PDF report...")
     report_generator = PDFReportGenerator(config)
     
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -481,8 +483,8 @@ def _generate_and_save_report(analysis_results, server_name, output_path, config
     
     logger.info(f"Analysis completed successfully!")
     logger.info(f"Report saved to: {report_path}")
-    simple_print(f"✅ Analysis completed!")
-    simple_print(f"📋 Report saved to: {report_path}")
+    simple_print(f"Analysis completed!")
+    simple_print(f"Report saved to: {report_path}")
     
     return report_path
 
@@ -504,13 +506,23 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
         import os
         os.environ['AI_ANALYSIS_ENABLED'] = 'true'
         logger.info("AI analysis enabled via command line flag")
-        simple_print("🧠 AI Analysis: Enabled")
+        simple_print("AI Analysis: Enabled")
+        
+        # Reload config to pick up environment variable
+        config._load_config()
+        
+        # Validate AI configuration
+        if not config.validate_ai_config():
+            simple_print("\n[WARNING] AI analysis requested but configuration is incomplete.")
+            simple_print("   Analysis will continue WITHOUT AI recommendations.\n")
+            simple_print("   See log file for configuration details.\n")
+            ai_analysis = False  # Disable AI if config invalid
     
     # Handle PerfMon analysis
     perfmon_results = None
     if perfmon_file:
         logger.info(f"Analyzing Performance Monitor data from: {perfmon_file}")
-        simple_print(f"📊 Analyzing Performance Monitor data from: {perfmon_file}")
+        simple_print(f"Analyzing Performance Monitor data from: {perfmon_file}")
         from src.perfmon.performance_analyzer import PerformanceCounterAnalyzer
         perfmon_analyzer = PerformanceCounterAnalyzer(config)
         perfmon_results = perfmon_analyzer.analyze_performance_log(perfmon_file)
@@ -520,7 +532,7 @@ def run_analysis(server_name, output_path, config, night_mode=False, ai_analysis
             perfmon_results = None
         else:
             logger.info("Performance Monitor analysis completed successfully")
-            simple_print("✅ Performance Monitor analysis completed")
+            simple_print("Performance Monitor analysis completed")
     elif perfmon_duration and perfmon_duration > 0:
         logger.info(f"Starting automatic Performance Monitor data collection for {perfmon_duration} minutes...")
         perfmon_results, _ = _setup_perfmon_collection(perfmon_duration, config)

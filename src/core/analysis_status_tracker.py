@@ -371,9 +371,9 @@ class AnalysisStatusTracker:
         print("\n" + "="*self.console_width)
         
         if success:
-            print("✅ ANALYSIS COMPLETED SUCCESSFULLY".center(self.console_width))
+            print("ANALYSIS COMPLETED SUCCESSFULLY".center(self.console_width))
         else:
-            print("❌ ANALYSIS COMPLETED WITH ISSUES".center(self.console_width))
+            print("ANALYSIS COMPLETED WITH ISSUES".center(self.console_width))
         
         print("="*self.console_width)
         

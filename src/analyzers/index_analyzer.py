@@ -77,14 +77,14 @@ class IndexAnalyzer(BaseAnalyzer):
         except DatabaseQueryError as e:
             self.logger.error(f"Database query error in index analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Index query failed: {e}",
+                error=f"Index query failed: {e}",
                 error_type="database",
                 retry_available=True
             )
         except Exception as e:
             self.logger.error(f"Unexpected error in index analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Index analysis failed: {e}",
+                error=f"Index analysis failed: {e}",
                 error_type="analysis"
             )
     

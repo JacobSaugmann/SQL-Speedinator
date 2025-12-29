@@ -456,10 +456,13 @@ class SectionBuilder:
             story.append(Paragraph("No AI analysis available.", self.style_manager.get_style('BodyText')))
             return story
         
-        summary_text = ai_analysis.get('summary', 'AI analysis completed successfully.')
+        # Extract data from AnalysisResult if needed
+        ai_data = ai_analysis.get('data', {}) if hasattr(ai_analysis, 'get') else ai_analysis.data if hasattr(ai_analysis, 'data') else {}
+        
+        summary_text = ai_data.get('summary', 'AI analysis completed successfully.')
         story.append(Paragraph(summary_text, self.style_manager.get_style('ExecutiveSummary')))
         
-        recommendations = ai_analysis.get('recommendations', [])
+        recommendations = ai_data.get('recommendations', [])
         if recommendations:
             story.append(Spacer(1, 0.02*inch))
             story.append(Paragraph("Recommendations", self.style_manager.get_style('KeepTogetherSub')))

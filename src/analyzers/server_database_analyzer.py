@@ -9,8 +9,12 @@ from decimal import Decimal
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import DatabaseQueryError
 
 class ServerDatabaseAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server instance and database information"""
@@ -24,11 +28,11 @@ class ServerDatabaseAnalyzer(BaseAnalyzer):
         """
         super().__init__(connection, config)
     
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """Run complete server and database analysis
         
         Returns:
-            Dictionary containing server and database analysis results
+            AnalysisResult containing server and database analysis data
         """
         try:
             results = {
@@ -43,21 +47,21 @@ class ServerDatabaseAnalyzer(BaseAnalyzer):
             }
             
             self.logger.info("Server and database analysis completed successfully")
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in server/database analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"Database query failed: {str(e)}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error during server/database analysis: {str(e)}")
-            return {
-                'error': str(e),
-                'server_instance_info': {},
-                'server_configuration': {},
-                'memory_info': {},
-                'cpu_info': {},
-                'database_overview': [],
-                'database_files': [],
-                'security_info': {},
-                'backup_info': []
-            }
+            self.logger.error(f"Error during server/database analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
     
     def _get_server_instance_info(self) -> Dict[str, Any]:
         """Get comprehensive server instance information"""

@@ -116,13 +116,19 @@ def test_ai_integration_disabled():
         
         # Test with mock data
         mock_results = create_mock_analysis_results()
-        result = ai_analyzer.analyze(mock_results)
+        result_wrapper = ai_analyzer.analyze(mock_results)
         
-        if result and not result.get('ai_enabled', True):
-            print("✅ AI integration correctly reports as disabled")
-            return True
+        # Extract data from AnalysisResult
+        if result_wrapper.success:
+            result = result_wrapper.data
+            if result and not result.get('ai_enabled', True):
+                print("✅ AI integration correctly reports as disabled")
+                return True
+            else:
+                print("❌ AI integration did not properly handle disabled state")
+                return False
         else:
-            print("❌ AI integration did not properly handle disabled state")
+            print(f"❌ AI analysis returned error: {result_wrapper.error}")
             return False
             
     except Exception as e:

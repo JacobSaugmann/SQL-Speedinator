@@ -102,7 +102,7 @@ class TestSimpleServerAnalyzer:
         assert analyzer.connection is not None
         assert analyzer.config is not None
         assert analyzer.logger is not None
-        assert analyzer.logger.name == 'src.analyzers.simple_server_analyzer'
+        assert analyzer.logger.name == 'SimpleServerAnalyzer'
     
     def test_analyze_returns_structure_on_success(self, analyzer, sample_server_info, sample_database_info, sample_memory_info, sample_file_info):
         """Test that analyze returns proper structure"""
@@ -116,15 +116,16 @@ class TestSimpleServerAnalyzer:
         
         result = analyzer.analyze()
         
-        assert isinstance(result, dict)
-        assert 'server_instance_info' in result
-        assert 'database_overview' in result
-        assert 'memory_info' in result
-        assert 'database_files' in result
-        assert 'server_configuration' in result
-        assert 'cpu_info' in result
-        assert 'security_info' in result
-        assert 'backup_info' in result
+        assert result.success
+        assert isinstance(result.data, dict)
+        assert 'server_instance_info' in result.data
+        assert 'database_overview' in result.data
+        assert 'memory_info' in result.data
+        assert 'database_files' in result.data
+        assert 'server_configuration' in result.data
+        assert 'cpu_info' in result.data
+        assert 'security_info' in result.data
+        assert 'backup_info' in result.data
     
     def test_analyze_handles_exception(self, analyzer):
         """Test that analyze handles exceptions gracefully"""
@@ -133,6 +134,8 @@ class TestSimpleServerAnalyzer:
         result = analyzer.analyze()
         
         # Should return structured result with empty data when individual methods fail
+        assert result.success
+        assert isinstance(result.data, dict)
         expected_structure = {
             'server_instance_info': {},
             'database_overview': [],
@@ -143,7 +146,7 @@ class TestSimpleServerAnalyzer:
             'security_info': {},
             'backup_info': []
         }
-        assert result == expected_structure
+        assert result.data == expected_structure
     
     def test_get_basic_server_info_success(self, analyzer, sample_server_info):
         """Test successful basic server info retrieval"""
@@ -304,12 +307,13 @@ class TestSimpleServerAnalyzer:
         result = analyzer.analyze()
         
         # Should still return structure even with partial failures
-        assert isinstance(result, dict)
-        assert 'server_instance_info' in result
-        assert result['server_instance_info']['server_name'] == 'TestServer'
-        assert result['database_overview'] == []  # Failed, should return empty list
-        assert result['memory_info'] == {}        # Empty result
-        assert result['database_files'] == []     # Failed, should return empty list
+        assert result.success
+        assert isinstance(result.data, dict)
+        assert 'server_instance_info' in result.data
+        assert result.data['server_instance_info']['server_name'] == 'TestServer'
+        assert result.data['database_overview'] == []  # Failed, should return empty list
+        assert result.data['memory_info'] == {}        # Empty result
+        assert result.data['database_files'] == []     # Failed, should return empty list
     
     def test_multiple_sql_server_versions_parsing(self, analyzer):
         """Test parsing different SQL Server version strings"""
@@ -352,6 +356,7 @@ class TestSimpleServerAnalyzer:
             # Verify error was logged at least once
             assert mock_logger.call_count >= 1
             # Should return structured result with empty data
+            assert isinstance(result.data, dict)
             expected_structure = {
                 'server_instance_info': {},
                 'database_overview': [],
@@ -362,7 +367,7 @@ class TestSimpleServerAnalyzer:
                 'security_info': {},
                 'backup_info': []
             }
-            assert result == expected_structure
+            assert result.data == expected_structure
     
     def test_success_logging_on_completion(self, analyzer, sample_server_info, sample_database_info, sample_memory_info, sample_file_info):
         """Test that success is properly logged"""
@@ -378,7 +383,8 @@ class TestSimpleServerAnalyzer:
             
             # Verify success was logged
             mock_logger.assert_called_with("Simple server analysis completed successfully")
-            assert isinstance(result, dict)
+            assert result.success
+            assert isinstance(result.data, dict)
     
     def test_all_result_keys_present_even_with_failures(self, analyzer):
         """Test that all expected keys are present in result even when individual methods fail"""
@@ -396,5 +402,7 @@ class TestSimpleServerAnalyzer:
                         ]
                         
                         # All keys should be present even if methods return empty data
+                        assert result.success
+                        assert isinstance(result.data, dict)
                         for key in expected_keys:
-                            assert key in result
+                            assert key in result.data

@@ -31,7 +31,7 @@ Når nye regler tilføjes → fjern mindre kritiske. Ingen "bare add" uden clean
 
 ## 1b. OUTPUT & LOGGING - KRITISK REGEL ⚠️
 
-**ALDRIG print() - ALTID self.logger:**
+**ALDRIG print() til logging - ALTID self.logger:**
 
 ```python
 self.logger.info("Starting analysis...")      # ✅ Normal info
@@ -46,9 +46,30 @@ self.logger.debug("Development details")      # ✅ Dev info
 - Production-ready
 
 ❌ **ALDRIG:**
-- print("...") - Ingen kontrol, uprofessionelt
-- Emojis i output - Never
+- print("...") til logging - Ingen kontrol, uprofessionelt
+- **EMOJI I LOGGER, PRINT ELLER OUTPUT** - Windows console (cp1252) kan ikke håndtere Unicode emoji
+- Emoji i logger.info/warning/error - Giver UnicodeEncodeError på Windows
+- Emoji i print() statements - Giver encoding fejl i console
 - print() til fejlmeddelelser - Ingen kontekst
+
+**Windows Console Encoding - ABSOLUT FORBUD MOD EMOJI:**
+```python
+# ❌ DÅRLIGT - Crasher på Windows console
+self.logger.info("✅ Analysis complete")
+self.logger.warning("⚠️ High CPU")
+self.logger.error("❌ Failed")
+print("🚀 Starting...")
+print("✅ Done!")
+
+# ✅ GODT - ASCII only ALTID
+self.logger.info("Analysis complete")
+self.logger.warning("High CPU detected")
+self.logger.error("Operation failed")
+print("Starting...")
+print("Done!")
+```
+
+**Regel:** INGEN emoji nogen steder i koden - hverken logger, print, output eller kommentarer.
 
 ### ❌ DONT - Hvad skal du UNDGÅ
 
@@ -261,7 +282,59 @@ Før du committer:
 □ Klasser under 300 linjer?         □ Ingen hardkodede values?
 □ Type hints overalt?               □ Error handling specifikt?
 □ Return types specifikt?           □ ALDRIG print() - brug logger
+□ Tests kørt i korrekt .venv?       □ Midlertidige filer ryddet op?
 ```
+
+---
+
+## 9b. TEST & DEPLOYMENT - KRITISK ⚠️
+
+**ALTID brug korrekt virtual environment:**
+
+```powershell
+# ✅ KORREKT - Aktivér .venv først
+cd "C:\Users\jsa\Scripts\Python Projects\Sql_bottleneck"
+.\.venv\Scripts\Activate.ps1
+python main.py -s localhost --perfmon-duration 120
+
+# ✅ KORREKT - Pytest i venv
+.\.venv\Scripts\Activate.ps1
+python -m pytest tests/ -v
+
+# ❌ FORKERT - Global Python environment
+python main.py  # Bruger system Python, ikke project dependencies!
+```
+
+**Cleanup efter tests:**
+
+```python
+# ✅ ALTID ryd op efter tests
+import os
+import shutil
+from pathlib import Path
+
+def cleanup_test_artifacts():
+    """Fjern midlertidige test filer og dokumenter"""
+    temp_patterns = [
+        'tests/fixtures/temp_*.pdf',
+        'tests/output/*.csv',
+        'tests/coverage_html/',
+        '**/__pycache__',
+        '**/*.pyc'
+    ]
+    for pattern in temp_patterns:
+        for path in Path('.').glob(pattern):
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                shutil.rmtree(path)
+```
+
+❌ **ALDRIG efterlad:**
+- Test output filer (PDFs, CSVs) i repo
+- __pycache__ directories
+- .pyc compiled files
+- Midlertidige log filer fra tests
 
 ---
 

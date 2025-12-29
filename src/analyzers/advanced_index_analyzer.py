@@ -9,8 +9,10 @@ from dataclasses import dataclass
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
 
 @dataclass
 class IndexAnalysisSettings:
@@ -98,10 +100,36 @@ class AdvancedIndexAnalyzer(BaseAnalyzer):
     def __init__(self, connection, config=None):
         super().__init__(connection, config or type('DummyConfig', (), {})())
     
-    def analyze(self):
-        """Implement BaseAnalyzer interface"""
-        # Return empty results as the real analyze_indexes() requires settings
-        return {'missing_indexes': [], 'unused_indexes': []}
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
+        """Implement BaseAnalyzer interface
+        
+        Returns:
+            AnalysisResult containing basic index analysis (analyze_indexes() requires settings)
+        """
+        try:
+            # Call analyze_indexes with default settings and wrap in AnalysisResult
+            settings = IndexAnalysisSettings()
+            index_results = self.analyze_indexes(settings)
+            
+            # Convert dataclass results to dict format
+            result_dict = {
+                'missing_indexes': [vars(idx) for idx in index_results.missing_indexes],
+                'existing_indexes': [vars(idx) for idx in index_results.existing_indexes],
+                'overlapping_indexes': [vars(idx) for idx in index_results.overlapping_indexes],
+                'unused_indexes': [vars(idx) for idx in index_results.unused_indexes],
+                'total_wasted_space_mb': index_results.total_wasted_space_mb,
+                'metadata_age_days': index_results.metadata_age_days,
+                'warnings': index_results.warnings
+            }
+            
+            return AnalysisResult.success_result(data=result_dict)
+            
+        except Exception as e:
+            self.logger.error(f"Advanced index analysis failed: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
     
     def analyze_indexes(self, settings: IndexAnalysisSettings = None) -> IndexAnalysisResults:
         """

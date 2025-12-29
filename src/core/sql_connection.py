@@ -60,6 +60,13 @@ class SQLServerConnection:
                 f"CommandTimeout={self.config.query_timeout};"
             )
         
+        # Handle ODBC Driver 18+ encryption requirements
+        if 'Driver 18' in driver:
+            # Driver 18 requires encryption settings
+            connection_string += "Encrypt=no;"  # Disable encryption for local connections
+        
+        self.logger.debug(f"Connection driver: {driver}")
+        
         return connection_string
     
     def connect(self) -> bool:

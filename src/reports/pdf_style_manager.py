@@ -409,6 +409,43 @@ class PDFStyleManager:
         """
         return self.text_formatter.clean_text(text)
     
+    def _get_modern_table_style(self):
+        """
+        Get modern table style for report tables.
+        
+        Returns:
+            TableStyle with Schultz branding and modern look
+        """
+        from reportlab.platypus import TableStyle
+        
+        return TableStyle([
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 0), self.schultz_colors['purple']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+            
+            # Body styling
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            
+            # Grid and borders
+            ('GRID', (0, 0), (-1, -1), 0.5, self.schultz_colors['light_gray']),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            
+            # Alternate row coloring for readability
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8f9fa')]),
+        ])
+    
     def format_number(self, value: Any, format_type: str = 'default') -> str:
         """
         Format numbers with appropriate styling.

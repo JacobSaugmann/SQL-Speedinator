@@ -65,12 +65,13 @@ class TestIndexAnalyzer:
                                     
                                     result = analyzer.analyze()
                                     
-                                    assert 'fragmented_indexes' in result
-                                    assert 'unused_indexes' in result
-                                    assert 'duplicate_indexes' in result
-                                    assert result['fragmented_indexes'] == sample_index_data['fragmented_indexes']
-                                    assert result['unused_indexes'] == sample_index_data['unused_indexes']
-                                    assert result['duplicate_indexes'] == sample_index_data['duplicate_indexes']
+                                    assert result.success
+                                    assert 'fragmented_indexes' in result.data
+                                    assert 'unused_indexes' in result.data
+                                    assert 'duplicate_indexes' in result.data
+                                    assert result.data['fragmented_indexes'] == sample_index_data['fragmented_indexes']
+                                    assert result.data['unused_indexes'] == sample_index_data['unused_indexes']
+                                    assert result.data['duplicate_indexes'] == sample_index_data['duplicate_indexes']
 
     def test_analyze_failure(self, mock_sql_connection, mock_config):
         """Test analysis failure handling"""
@@ -80,8 +81,9 @@ class TestIndexAnalyzer:
         with patch.object(analyzer, '_get_fragmented_indexes', side_effect=Exception("Test error")):
             result = analyzer.analyze()
             
-            assert 'error' in result
-            assert "Test error" in result['error']
+            assert not result.success
+            assert result.error is not None
+            assert "Test error" in result.error
 
     def test_get_fragmented_indexes_success(self, mock_sql_connection, mock_config):
         """Test successful fragmented indexes retrieval"""

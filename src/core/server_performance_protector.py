@@ -97,7 +97,7 @@ class ServerPerformanceProtector:
             )
             self.monitoring_thread.start()
             
-            self.logger.info(f"🛡️  Server performance protection started (CPU: {self.thresholds.max_cpu_percent}%, Waits: {self.thresholds.max_wait_time_ms}ms)")
+            self.logger.info(f"Server performance protection started (CPU: {self.thresholds.max_cpu_percent}%, Waits: {self.thresholds.max_wait_time_ms}ms)")
             return True
             
         except Exception as e:
@@ -133,7 +133,7 @@ class ServerPerformanceProtector:
         }
         
         self.status.is_monitoring = False
-        self.logger.info(f"🛡️  Performance monitoring stopped. Duration: {analysis_duration:.1f}min, Violations: {self.status.violation_count}")
+        self.logger.info(f"Performance monitoring stopped. Duration: {analysis_duration:.1f}min, Violations: {self.status.violation_count}")
         
         return summary
     
@@ -287,7 +287,7 @@ class ServerPerformanceProtector:
         
         # Log violations
         for violation in violations:
-            self.logger.warning(f"⚠️  Performance violation: {violation}")
+            self.logger.warning(f"Performance violation: {violation}")
         
         # Call violation callback if set
         if self.on_violation_detected:

@@ -65,8 +65,9 @@ class TestServerDatabaseAnalyzer:
             'database_overview', 'database_files', 'security_info', 'backup_info'
         ]
         
+        assert result.success
         for key in expected_keys:
-            assert key in result
+            assert key in result.data
     
     def test_analyze_handles_exception(self, mock_connection, mock_config):
         """Test that analyze method handles exceptions gracefully"""
@@ -77,8 +78,9 @@ class TestServerDatabaseAnalyzer:
         
         result = analyzer.analyze()
         
-        assert 'error' in result
-        assert 'Database error' in result['error']
+        assert not result.success
+        assert result.error is not None
+        assert 'Database error' in result.error
     
     def test_get_server_instance_info_success(self, mock_connection, mock_config):
         """Test successful server instance info retrieval"""
@@ -155,14 +157,11 @@ class TestServerDatabaseAnalyzer:
         """Test successful memory info retrieval"""
         memory_data = [
             {
-                'counter_name': 'Total Server Memory (KB)',
-                'cntr_value': 2097152,  # 2GB in KB
-                'counter_type': 'Memory Usage'
-            },
-            {
-                'counter_name': 'Target Server Memory (KB)',
-                'cntr_value': 8388608,  # 8GB in KB
-                'counter_type': 'Memory Usage'
+                'total_physical_memory_gb': 16.0,
+                'total_virtual_memory_gb': 20.0,
+                'committed_memory_gb': 8.0,
+                'committed_target_gb': 12.0,
+                'visible_target_gb': 14.0
             }
         ]
         mock_connection.execute_query.return_value = memory_data
@@ -170,16 +169,23 @@ class TestServerDatabaseAnalyzer:
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
         result = analyzer._get_memory_info()
         
-        assert result == memory_data
+        # Method returns first element as dict with added memory_pressure and memory_usage_percentage
+        assert isinstance(result, dict)
+        assert result['total_physical_memory_gb'] == 16.0
+        assert result['committed_memory_gb'] == 8.0
+        assert 'memory_pressure' in result
+        assert 'memory_usage_percentage' in result
+        assert result['memory_pressure'] == 'LOW'  # 8/16 = 50% < 70%
     
     def test_get_memory_info_exception(self, mock_connection, mock_config):
         """Test memory info with exception"""
         mock_connection.execute_query.side_effect = Exception("Memory query failed")
         
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
-        result = analyzer._get_memory_info()
         
-        assert result == []
+        # Method does not catch exceptions - they propagate
+        with pytest.raises(Exception, match="Memory query failed"):
+            analyzer._get_memory_info()
     
     def test_get_cpu_info_success(self, mock_connection, mock_config):
         """Test successful CPU info retrieval"""
@@ -212,9 +218,10 @@ class TestServerDatabaseAnalyzer:
         mock_connection.execute_query.side_effect = Exception("CPU query failed")
         
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
-        result = analyzer._get_cpu_info()
         
-        assert result == {}
+        # Method does not catch exceptions - they propagate
+        with pytest.raises(Exception, match="CPU query failed"):
+            analyzer._get_cpu_info()
     
     def test_get_database_overview_success(self, mock_connection, mock_config):
         """Test successful database overview retrieval"""
@@ -275,9 +282,10 @@ class TestServerDatabaseAnalyzer:
         mock_connection.execute_query.side_effect = Exception("Files query failed")
         
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
-        result = analyzer._get_database_files_info()
         
-        assert result == []
+        # Method does not catch exceptions - they propagate
+        with pytest.raises(Exception, match="Files query failed"):
+            analyzer._get_database_files_info()
     
     def test_get_security_info_success(self, mock_connection, mock_config):
         """Test successful security info retrieval"""
@@ -310,9 +318,10 @@ class TestServerDatabaseAnalyzer:
         mock_connection.execute_query.side_effect = Exception("Security query failed")
         
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
-        result = analyzer._get_security_info()
         
-        assert result == {}
+        # Method does not catch exceptions - they propagate
+        with pytest.raises(Exception, match="Security query failed"):
+            analyzer._get_security_info()
     
     def test_get_backup_info_success(self, mock_connection, mock_config):
         """Test successful backup info retrieval"""
@@ -337,9 +346,10 @@ class TestServerDatabaseAnalyzer:
         mock_connection.execute_query.side_effect = Exception("Backup query failed")
         
         analyzer = ServerDatabaseAnalyzer(mock_connection, mock_config)
-        result = analyzer._get_backup_info()
         
-        assert result == []
+        # Method does not catch exceptions - they propagate
+        with pytest.raises(Exception, match="Backup query failed"):
+            analyzer._get_backup_info()
     
     def test_multiple_method_calls_independence(self, mock_connection, mock_config):
         """Test that multiple method calls work independently"""
@@ -347,10 +357,11 @@ class TestServerDatabaseAnalyzer:
         
         # Set up different return values for different calls
         mock_connection.execute_query.side_effect = [
-            [{'server_name': 'Test'}],  # server info
-            [{'name': 'config1'}],      # server config  
-            [{'memory': 8192}],         # memory info
-            [{'cpu_count': 4}]          # cpu info
+            [{'server_name': 'Test'}],                    # server info
+            [{'name': 'config1'}],                        # server config  
+            [{'total_physical_memory_gb': 16.0,           # memory info
+              'committed_memory_gb': 8.0}],
+            [{'cpu_count': 4}]                            # cpu info
         ]
         
         # Call methods in sequence
@@ -362,7 +373,12 @@ class TestServerDatabaseAnalyzer:
         # Verify each method got correct data
         assert server_info == {'server_name': 'Test'}
         assert config_info == [{'name': 'config1'}]
-        assert memory_info == [{'memory': 8192}]
+        # Memory info returns dict with extra fields added
+        assert isinstance(memory_info, dict)
+        assert memory_info['total_physical_memory_gb'] == 16.0
+        assert memory_info['committed_memory_gb'] == 8.0
+        assert 'memory_pressure' in memory_info
+        assert 'memory_usage_percentage' in memory_info
         assert cpu_info == {'cpu_count': 4}
         
         # Verify execute_query was called 4 times

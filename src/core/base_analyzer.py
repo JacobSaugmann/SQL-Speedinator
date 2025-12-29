@@ -6,6 +6,7 @@ Provides common interface for all SQL Server performance analyzers
 from abc import ABC, abstractmethod
 import logging
 from typing import Dict, Any, List, Optional
+from .result_wrapper import AnalysisResult
 
 
 class BaseAnalyzer(ABC):
@@ -47,27 +48,28 @@ class BaseAnalyzer(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
     
     @abstractmethod
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
         """
-        Execute the analysis and return results.
+        Execute the analysis and return wrapped results.
         
         This method must be implemented by all subclasses.
+        All implementations must return AnalysisResult for consistent
+        error handling and graceful degradation.
         
         Returns:
-            Dict[str, Any]: Dictionary containing:
-                - Normal case: {'key1': value1, 'key2': value2, ...}
-                - Error case: {'error': 'error message', ...}
+            AnalysisResult[Dict[str, Any]]: Wrapped result containing:
+                - success: Boolean indicating if analysis succeeded
+                - data: Dictionary with analysis results (if successful)
+                - error: Error message (if failed)
+                - error_type: Type of error for handling logic
                 
-        Raises:
-            Should not raise - catch exceptions and return {'error': str(e)}
-            
         Example:
             >>> analyzer = MyAnalyzer(connection, config)
             >>> result = analyzer.analyze()
-            >>> if 'error' in result:
-            ...     print(f"Analysis failed: {result['error']}")
+            >>> if result.is_error():
+            ...     print(f"Analysis failed: {result.error}")
             ... else:
-            ...     print(f"Analysis succeeded: {result}")
+            ...     print(f"Analysis succeeded: {result.data}")
         """
         pass
     

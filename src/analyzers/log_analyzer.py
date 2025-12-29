@@ -21,8 +21,12 @@ from pathlib import Path
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import DatabaseQueryError
 
 class LogAnalyzer(BaseAnalyzer):
     """Analyzes SQL Server error logs and Windows event logs for performance issues"""
@@ -81,15 +85,19 @@ class LogAnalyzer(BaseAnalyzer):
             25: 'FATAL ERROR: SYSTEM ERROR'
         }
 
-    def analyze(self) -> Dict[str, Any]:
-        """Implement BaseAnalyzer interface by calling analyze_logs()"""
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
+        """Implement BaseAnalyzer interface by calling analyze_logs()
+        
+        Returns:
+            AnalysisResult containing log analysis results
+        """
         return self.analyze_logs()
 
-    def analyze_logs(self) -> Dict[str, Any]:
+    def analyze_logs(self) -> AnalysisResult[Dict[str, Any]]:
         """Perform comprehensive log analysis
         
         Returns:
-            Dictionary containing log analysis results
+            AnalysisResult containing log analysis results
         """
         self.logger.info("Starting comprehensive log analysis...")
         
@@ -114,17 +122,21 @@ class LogAnalyzer(BaseAnalyzer):
             results['recommendations'] = self._generate_recommendations(results)
             
             self.logger.info("Log analysis completed successfully")
-            return results
+            return AnalysisResult.success_result(data=results)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error during log analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"Database query failed: {str(e)}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error during log analysis: {str(e)}")
-            return {
-                'error': str(e),
-                'sql_server_errors': {},
-                'windows_events': {},
-                'summary': {'total_issues': 0},
-                'recommendations': []
-            }
+            self.logger.error(f"Error during log analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
 
     def _analyze_sql_server_logs(self) -> Dict[str, Any]:
         """Analyze SQL Server error logs for the last 7 days

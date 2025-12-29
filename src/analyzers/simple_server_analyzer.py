@@ -8,8 +8,12 @@ from ..core.config_manager import ConfigManager
 
 try:
     from ..core.base_analyzer import BaseAnalyzer
+    from ..core.result_wrapper import AnalysisResult
+    from ..core.exceptions import DatabaseQueryError
 except ImportError:
     from src.core.base_analyzer import BaseAnalyzer
+    from src.core.result_wrapper import AnalysisResult
+    from src.core.exceptions import DatabaseQueryError
 
 class SimpleServerAnalyzer(BaseAnalyzer):
     """Simplified server analyzer that works with older SQL Server versions"""
@@ -17,8 +21,12 @@ class SimpleServerAnalyzer(BaseAnalyzer):
     def __init__(self, connection: SQLServerConnection, config: ConfigManager):
         super().__init__(connection, config)
     
-    def analyze(self) -> Dict[str, Any]:
-        """Perform simplified server analysis using basic queries"""
+    def analyze(self) -> AnalysisResult[Dict[str, Any]]:
+        """Perform simplified server analysis using basic queries
+        
+        Returns:
+            AnalysisResult containing simple server analysis results
+        """
         try:
             result = {
                 'server_instance_info': self._get_basic_server_info(),
@@ -32,11 +40,21 @@ class SimpleServerAnalyzer(BaseAnalyzer):
             }
             
             self.logger.info("Simple server analysis completed successfully")
-            return result
+            return AnalysisResult.success_result(data=result)
             
+        except DatabaseQueryError as e:
+            self.logger.error(f"Database query error in simple server analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"Database query failed: {str(e)}",
+                error_type="database",
+                retry_available=True
+            )
         except Exception as e:
-            self.logger.error(f"Error during simple server analysis: {e}", exc_info=True)
-            return {}
+            self.logger.error(f"Error during simple server analysis: {str(e)}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=str(e),
+                error_type="analysis"
+            )
     
     def _get_basic_server_info(self) -> Dict[str, Any]:
         """Get basic server information using compatible queries"""

@@ -80,8 +80,9 @@ class TestServerConfigAnalyzer:
             'issues', 'recommendations'
         ]
         
+        assert result.success
         for key in expected_keys:
-            assert key in result
+            assert key in result.data
     
     @patch('src.analyzers.server_config_analyzer.SQLVersionManager')
     def test_analyze_handles_exception(self, mock_version_class, mock_connection, mock_config):
@@ -94,8 +95,9 @@ class TestServerConfigAnalyzer:
         
         result = analyzer.analyze()
         
-        assert 'error' in result
-        assert 'Database error' in result['error']
+        assert not result.success
+        assert result.error is not None
+        assert 'Database error' in result.error
     
     @patch('src.analyzers.server_config_analyzer.SQLVersionManager')
     def test_get_server_info_success(self, mock_version_class, mock_connection, mock_config):

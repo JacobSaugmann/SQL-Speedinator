@@ -122,11 +122,9 @@ class PDFReportGenerator:
             wait_data = analysis_results['wait_stats'].get('data', {})
             story.extend(self.section_builder.create_wait_stats_section(wait_data))
         
-        # Disk performance
+        # Disk performance - consistent data access
         if 'disk_performance' in analysis_results:
-            disk_data = analysis_results['disk_performance']
-            if isinstance(disk_data, dict) and 'data' in disk_data:
-                disk_data = disk_data['data']
+            disk_data = analysis_results['disk_performance'].get('data', {})
             story.extend(self.section_builder.create_disk_analysis_section(disk_data))
         
         # Index analysis
@@ -134,17 +132,14 @@ class PDFReportGenerator:
             index_data = analysis_results['index_analysis'].get('data', {})
             story.extend(self.section_builder.create_index_analysis_section(index_data))
         
-        # Missing indexes
+        # Missing indexes - consistent data access
         if 'missing_indexes' in analysis_results:
-            missing_data = analysis_results['missing_indexes']
-            if isinstance(missing_data, dict) and 'data' in missing_data:
-                all_missing = []
-                data = missing_data['data']
-                for category in ['high_impact_indexes', 'medium_impact_indexes', 'low_impact_indexes']:
-                    if category in data:
-                        all_missing.extend(data[category])
-                missing_data = all_missing
-            story.extend(self.section_builder.create_missing_index_section(missing_data))
+            missing_data = analysis_results['missing_indexes'].get('data', {})
+            all_missing = []
+            for category in ['high_impact_indexes', 'medium_impact_indexes', 'low_impact_indexes']:
+                if category in missing_data:
+                    all_missing.extend(missing_data[category])
+            story.extend(self.section_builder.create_missing_index_section(all_missing))
         
         # Server configuration
         if 'server_database_info' in analysis_results:
@@ -173,11 +168,9 @@ class PDFReportGenerator:
                 analysis_results['perfmon_analysis']
             ))
         
-        # Log analysis
+        # Log analysis - consistent data access
         if 'log_analysis' in analysis_results:
-            log_data = analysis_results['log_analysis']
-            if isinstance(log_data, dict) and 'data' in log_data:
-                log_data = log_data['data']
+            log_data = analysis_results['log_analysis'].get('data', {})
             story.extend(self.section_builder.create_log_analysis_section(log_data))
         
         return story

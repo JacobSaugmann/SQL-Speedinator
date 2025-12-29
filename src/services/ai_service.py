@@ -7,17 +7,24 @@ import logging
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+from pathlib import Path
 from openai import AzureOpenAI
 try:
     from ..core.config_manager import ConfigManager
     from ..reports.text_formatter import TextFormatter
     from ..core.circuit_breaker import CircuitBreaker
     from ..core.exceptions import AIServiceUnavailableError, AIError
+    from .token_counter import TokenCounter
+    from .token_budget import TokenBudget
+    from .prompty_loader import PromptyLoader
 except ImportError:
     from core.config_manager import ConfigManager
     from reports.text_formatter import TextFormatter
     from core.circuit_breaker import CircuitBreaker
     from core.exceptions import AIServiceUnavailableError, AIError
+    from token_counter import TokenCounter
+    from token_budget import TokenBudget
+    from prompty_loader import PromptyLoader
 
 class AIService:
     """Azure OpenAI service for performance analysis insights
@@ -35,6 +42,15 @@ class AIService:
         self.logger = logging.getLogger(__name__)
         self.text_formatter = TextFormatter()
         self.client = None
+        
+        # Initialize token management
+        self.token_counter = TokenCounter(model="gpt-4")
+        self.token_budget = TokenBudget(self.token_counter)
+        
+        # Initialize Prompty loader
+        prompts_dir = Path(__file__).parent.parent / "prompts"
+        self.prompty_loader = PromptyLoader(prompts_dir)
+        
         self.circuit_breaker = CircuitBreaker(
             name="AIService",
             failure_threshold=3,
@@ -161,8 +177,42 @@ class AIService:
             AIError: If service call fails
         """
         try:
-            # Create efficient prompt to minimize tokens
+            # Load Prompty template for SQL performance specialist
+            prompt_template = self.prompty_loader.load_prompt("sql_performance_specialist")
+            system_message = prompt_template.system_message
+            
+            # Count system prompt tokens
+            system_tokens = self.token_counter.count_tokens(system_message)
+            self.logger.info(f"System prompt: {system_tokens} tokens")
+            
+            # Apply token budget to performance data
+            fits, data_tokens, reason = self.token_budget.check_budget(performance_summary)
+            
+            if not fits:
+                self.logger.warning(f"Data exceeds budget: {reason}")
+                performance_summary = self.token_budget.reduce_to_budget(performance_summary)
+                data_tokens = self.token_counter.count_tokens(json.dumps(performance_summary, default=str))
+            
+            # Create efficient prompt
             prompt = self._create_analysis_prompt(performance_summary)
+            prompt_tokens = self.token_counter.count_tokens(prompt)
+            
+            # Final budget check
+            total_tokens = system_tokens + prompt_tokens
+            if total_tokens > self.token_budget.BUDGETS['total_max'] * 0.6:  # Leave 40% for response
+                raise AIError(
+                    f"Token budget exceeded: {total_tokens} tokens (max: {self.token_budget.BUDGETS['total_max']})",
+                    error_code="TOKEN_BUDGET_EXCEEDED"
+                )
+            
+            self.logger.info(
+                f"Token budget: system={system_tokens}, data={prompt_tokens}, "
+                f"total={total_tokens}/{self.token_budget.BUDGETS['total_max']}"
+            )
+            
+            # Get model parameters from Prompty template
+            max_tokens = prompt_template.get_max_tokens() or self.config.ai_max_tokens
+            temperature = prompt_template.get_temperature() or self.config.ai_temperature
             
             self.logger.info("Sending performance data to Azure OpenAI for analysis")
             
@@ -171,19 +221,45 @@ class AIService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert SQL Server performance analyst. Analyze the provided performance data and identify the TOP 3 bottlenecks with specific, actionable recommendations. Be concise and focus on highest impact issues. Format your response as JSON."
+                        "content": system_message
                     },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                max_tokens=self.config.ai_max_tokens,
-                temperature=self.config.ai_temperature,
+                max_tokens=max_tokens,
+                temperature=temperature,
                 response_format={"type": "json_object"}
             )
             
             ai_response = response.choices[0].message.content
+            
+            # Log token usage
+            if response.usage:
+                usage = response.usage
+                self.logger.info(
+                    f"Token usage: prompt={usage.prompt_tokens}, "
+                    f"completion={usage.completion_tokens}, total={usage.total_tokens}"
+                )
+                
+                # Get budget summary
+                budget_summary = self.token_budget.get_budget_summary(
+                    system_prompt_tokens=system_tokens,
+                    data_tokens=prompt_tokens,
+                    response_tokens=usage.completion_tokens
+                )
+                
+                # Log budget compliance
+                if budget_summary['within_budget']:
+                    self.logger.info(
+                        f"Within budget: {budget_summary['total']['percentage']:.1f}% used"
+                    )
+                else:
+                    self.logger.warning(
+                        f"Over budget: {budget_summary['total']['percentage']:.1f}% used"
+                    )
+            
             self.logger.info("Received AI analysis response")
             
             # Parse and structure the response
@@ -197,6 +273,7 @@ class AIService:
                 'model_used': self.config.azure_openai_model,
                 'analysis': analysis_result,
                 'tokens_used': response.usage.total_tokens if response.usage else 0,
+                'token_budget_summary': budget_summary if response.usage else None,
                 'generated_at': None  # Will be set by caller
             }
             

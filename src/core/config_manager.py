@@ -30,7 +30,19 @@ class ConfigManager:
                 load_dotenv(self.config_file)
                 self.logger.info(f"Loaded configuration from {self.config_file}")
             else:
-                self.logger.warning(f"Configuration file {self.config_file} not found, using defaults")
+                # Check if .env.example exists to guide user
+                example_file = self.config_file.parent / ".env.example"
+                if example_file.exists():
+                    self.logger.warning(
+                        f"Configuration file '{self.config_file}' not found.\n"
+                        f"   To enable AI analysis and custom settings:\n"
+                        f"   1. Copy '.env.example' to '.env'\n"
+                        f"   2. Edit '.env' with your Azure OpenAI credentials\n"
+                        f"   3. Set AI_ANALYSIS_ENABLED=true\n"
+                        f"   Using defaults for now."
+                    )
+                else:
+                    self.logger.warning(f"Configuration file {self.config_file} not found, using defaults")
         except Exception as e:
             self.logger.error(f"Error loading configuration: {e}")
             raise
@@ -119,7 +131,32 @@ class ConfigManager:
     
     @property
     def sql_driver(self):
-        return self.get('SQL_DRIVER', 'ODBC Driver 17 for SQL Server')
+        """Get SQL driver, auto-detect if not configured"""
+        configured = self.get('SQL_DRIVER', None)
+        
+        if configured:
+            return configured
+        
+        # Auto-detect available ODBC driver (prefer newer versions)
+        try:
+            import pyodbc
+            available_drivers = pyodbc.drivers()
+            
+            # Prefer driver 18, then 17, then any SQL Server driver
+            for driver_name in ['ODBC Driver 18 for SQL Server', 'ODBC Driver 17 for SQL Server', 'SQL Server']:
+                if driver_name in available_drivers:
+                    return driver_name
+            
+            # Fallback to first available SQL Server driver
+            for driver in available_drivers:
+                if 'SQL Server' in driver:
+                    return driver
+            
+        except Exception:
+            pass
+        
+        # Final fallback
+        return 'ODBC Driver 18 for SQL Server'
     
     @property
     def connection_timeout(self):
@@ -221,7 +258,18 @@ class ConfigManager:
             missing_fields.append('AZURE_OPENAI_DEPLOYMENT')
         
         if missing_fields:
-            self.logger.error(f"AI Copilot enabled but missing required config: {', '.join(missing_fields)}")
+            self.logger.error(
+                f"\nAI Analysis enabled but missing required configuration:\n"
+                f"   Missing: {', '.join(missing_fields)}\n\n"
+                f"   To fix this:\n"
+                f"   1. Create/edit '.env' file in project root\n"
+                f"   2. Add your Azure OpenAI credentials:\n"
+                f"      AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/\n"
+                f"      AZURE_OPENAI_API_KEY=your_api_key_here\n"
+                f"      AZURE_OPENAI_DEPLOYMENT=your_deployment_name\n"
+                f"   3. Set AI_ANALYSIS_ENABLED=true\n\n"
+                f"   Or copy '.env.example' to '.env' and customize it.\n"
+            )
             return False
         
         return True

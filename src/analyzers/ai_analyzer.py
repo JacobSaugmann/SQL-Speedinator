@@ -8,8 +8,10 @@ from typing import Dict, Any, List
 from datetime import datetime
 try:
     from ..services.ai_service import AIService
+    from ..core.result_wrapper import AnalysisResult
 except ImportError:
     from services.ai_service import AIService
+    from src.core.result_wrapper import AnalysisResult
 
 # Note: AIAnalyzer doesn't inherit from BaseAnalyzer since it doesn't take a connection
 # It's a specialized analyzer that works with aggregated data
@@ -26,20 +28,21 @@ class AIAnalyzer:
         self.logger = logging.getLogger(__name__)
         self.ai_service = AIService(config)
     
-    def analyze(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze(self, analysis_results: Dict[str, Any]) -> AnalysisResult[Dict[str, Any]]:
         """Perform AI analysis on collected performance data
         
         Args:
             analysis_results: Complete performance analysis results
             
         Returns:
-            Dict containing AI analysis results
+            AnalysisResult containing AI analysis results
         """
         if not self.ai_service.is_enabled():
-            return {
+            result = {
                 'ai_enabled': False,
                 'analysis': {'message': 'AI Copilot not enabled'}
             }
+            return AnalysisResult.success_result(data=result)
         
         try:
             # Create performance summary optimized for AI analysis
@@ -52,17 +55,19 @@ class AIAnalyzer:
                 ai_result['generated_at'] = datetime.now().isoformat()
                 self.logger.info(f"AI analysis completed. Tokens used: {ai_result.get('tokens_used', 0)}")
             
-            return ai_result or {
+            result = ai_result or {
                 'ai_enabled': True,
                 'analysis': {'error': 'AI analysis failed'}
             }
             
+            return AnalysisResult.success_result(data=result)
+            
         except Exception as e:
-            self.logger.error(f"AI analysis error: {e}")
-            return {
-                'ai_enabled': True,
-                'analysis': {'error': f'AI analysis error: {str(e)}'}
-            }
+            self.logger.error(f"AI analysis error: {e}", exc_info=True)
+            return AnalysisResult.error_result(
+                error=f"AI analysis error: {str(e)}",
+                error_type="ai_service"
+            )
     
     def _create_performance_summary(self, analysis_results: Dict[str, Any]) -> Dict[str, Any]:
         """Create optimized performance summary for AI analysis

@@ -49,14 +49,14 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         except DatabaseQueryError as e:
             self.logger.error(f"Database query error in wait stats analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Wait stats query failed: {e}",
+                error=f"Wait stats query failed: {e}",
                 error_type="database",
                 retry_available=True
             )
         except Exception as e:
             self.logger.error(f"Unexpected error in wait stats analysis: {e}", exc_info=True)
             return AnalysisResult.error_result(
-                error_msg=f"Wait stats analysis failed: {e}",
+                error=f"Wait stats analysis failed: {e}",
                 error_type="analysis"
             )
     

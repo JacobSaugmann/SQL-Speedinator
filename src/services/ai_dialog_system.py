@@ -56,7 +56,7 @@ class AIDialogSystem:
         """
         session_id = f"dialog_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        self.logger.info(f"🤖 Starting AI bottleneck investigation session: {session_id}")
+        self.logger.info(f"Starting AI bottleneck investigation session: {session_id}")
         
         # Initialize dialog context
         context = DialogContext(
@@ -77,13 +77,13 @@ class AIDialogSystem:
         local_bottlenecks = self._run_local_bottleneck_analysis(analysis_results)
         
         if local_bottlenecks['confidence'] >= self.confidence_threshold:
-            self.logger.info(f"✅ Local analysis achieved high confidence ({local_bottlenecks['confidence']:.1%})")
+            self.logger.info(f"Local analysis achieved high confidence ({local_bottlenecks['confidence']:.1%})")
             context.identified_bottlenecks = local_bottlenecks['bottlenecks']
             context.confidence_score = local_bottlenecks['confidence']
             context.status = 'completed'
             return context
         
-        self.logger.info(f"🔍 Local analysis confidence low ({local_bottlenecks['confidence']:.1%}), starting AI dialog...")
+        self.logger.info(f"Local analysis confidence low ({local_bottlenecks['confidence']:.1%}), starting AI dialog...")
         
         # Start AI dialog for unclear cases
         context = self._conduct_ai_dialog(context, local_bottlenecks)
@@ -358,13 +358,13 @@ class AIDialogSystem:
                context.total_tokens_used < context.max_tokens_allowed):
             
             context.current_turn += 1
-            self.logger.info(f"🤖 AI Dialog Turn {context.current_turn}/{context.max_turns}")
+            self.logger.info(f"AI Dialog Turn {context.current_turn}/{context.max_turns}")
             
             # Generate questions for current bottlenecks
             questions = self._generate_clarifying_questions(context.identified_bottlenecks)
             
             if not questions:
-                self.logger.info("✅ No more questions needed, analysis complete")
+                self.logger.info("No more questions needed, analysis complete")
                 context.status = 'completed'
                 break
             
@@ -372,7 +372,7 @@ class AIDialogSystem:
             ai_response = self._ask_ai_for_insights(context, questions)
             
             if not ai_response:
-                self.logger.warning("❌ AI failed to respond, ending dialog")
+                self.logger.warning("AI failed to respond, ending dialog")
                 context.status = 'aborted'
                 break
             
@@ -387,11 +387,11 @@ class AIDialogSystem:
                 context.identified_bottlenecks = self._merge_insights(context.identified_bottlenecks, new_insights)
                 context.confidence_score = self._calculate_overall_confidence(context.identified_bottlenecks)
                 
-                self.logger.info(f"🎯 Updated confidence: {context.confidence_score:.1%}")
+                self.logger.info(f"Updated confidence: {context.confidence_score:.1%}")
                 
                 # Check if we have high confidence now
                 if context.confidence_score >= self.confidence_threshold:
-                    self.logger.info("✅ Achieved high confidence, ending dialog")
+                    self.logger.info("Achieved high confidence, ending dialog")
                     context.status = 'completed'
                     break
             
@@ -409,12 +409,12 @@ class AIDialogSystem:
         # Check why we exited the loop
         if context.total_tokens_used >= context.max_tokens_allowed:
             context.status = 'token_limit_reached'
-            self.logger.warning(f"🚫 Token limit reached ({context.total_tokens_used}/{context.max_tokens_allowed})")
+            self.logger.warning(f"Token limit reached ({context.total_tokens_used}/{context.max_tokens_allowed})")
         elif context.current_turn >= context.max_turns:
             context.status = 'max_turns_reached'
-            self.logger.warning(f"🚫 Maximum turns reached ({context.current_turn}/{context.max_turns})")
+            self.logger.warning(f"Maximum turns reached ({context.current_turn}/{context.max_turns})")
         
-        self.logger.info(f"🏁 AI dialog completed with status: {context.status}")
+        self.logger.info(f"AI dialog completed with status: {context.status}")
         return context
     
     def _generate_clarifying_questions(self, bottlenecks: List[Dict[str, Any]]) -> List[str]:

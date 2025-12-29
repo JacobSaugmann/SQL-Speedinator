@@ -13,3 +13,4 @@ argparse
 datetime
 configparser==6.0.0
 openai==2.6.1
+tiktoken==0.7.0

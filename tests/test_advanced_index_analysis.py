@@ -61,43 +61,55 @@ def test_advanced_index_analysis():
         
         print(f"  - Running with settings: min_advantage={settings.min_advantage}, only_analysis={settings.only_index_analysis}")
         
-        # Run analysis
-        results = analyzer.analyze_indexes(settings)
+        # Run analysis via analyze() method which returns AnalysisResult
+        result = analyzer.analyze()
+        
+        if not result.success:
+            print(f"❌ Analysis failed: {result.error}")
+            return
+        
+        # Extract IndexAnalysisResults from AnalysisResult.data
+        results_dict = result.data
         
         print(f"\n✓ Advanced index analysis completed!")
-        print(f"  - Missing Indexes: {len(results.missing_indexes)}")
-        print(f"  - Existing Indexes: {len(results.existing_indexes)}")
-        print(f"  - Overlapping Indexes: {len(results.overlapping_indexes)}")
-        print(f"  - Unused Indexes: {len(results.unused_indexes)}")
-        print(f"  - Total Wasted Space: {results.total_wasted_space_mb:.2f} MB")
-        print(f"  - Metadata Age: {results.metadata_age_days} days")
+        print(f"  - Missing Indexes: {len(results_dict.get('missing_indexes', []))}")
+        print(f"  - Existing Indexes: {len(results_dict.get('existing_indexes', []))}")
+        print(f"  - Overlapping Indexes: {len(results_dict.get('overlapping_indexes', []))}")
+        print(f"  - Unused Indexes: {len(results_dict.get('unused_indexes', []))}")
+        print(f"  - Total Wasted Space: {results_dict.get('total_wasted_space_mb', 0):.2f} MB")
+        print(f"  - Metadata Age: {results_dict.get('metadata_age_days', 0)} days")
         
         # Show warnings
-        if results.warnings:
+        warnings = results_dict.get('warnings', [])
+        if warnings:
             print(f"\n⚠️ Warnings:")
-            for warning in results.warnings:
+            for warning in warnings:
                 print(f"  - {warning}")
         
         # Show top missing indexes
-        if results.missing_indexes:
+        missing_indexes = results_dict.get('missing_indexes', [])
+        if missing_indexes:
             print(f"\n🔍 Top Missing Indexes:")
-            for i, idx in enumerate(results.missing_indexes[:5], 1):
-                print(f"  {i}. {idx.table_name}")
-                print(f"     Columns: {idx.equality_columns or idx.inequality_columns}")
-                if idx.included_columns:
-                    print(f"     Include: {idx.included_columns}")
-                print(f"     Advantage: {idx.create_index_advantage:.2f}, Impact: {idx.avg_user_impact}%")
-                print(f"     Usage: Scans={idx.user_scans}, Seeks={idx.user_seeks}")
-                print(f"     CREATE: {idx.create_index_statement[:100]}...")
+            for i, idx in enumerate(missing_indexes[:5], 1):
+                print(f"  {i}. {idx.get('table_name', 'Unknown')}")
+                print(f"     Columns: {idx.get('equality_columns') or idx.get('inequality_columns')}")
+                if idx.get('included_columns'):
+                    print(f"     Include: {idx['included_columns']}")
+                print(f"     Advantage: {idx.get('create_index_advantage', 0):.2f}, Impact: {idx.get('avg_user_impact', 0)}%")
+                print(f"     Usage: Scans={idx.get('user_scans', 0)}, Seeks={idx.get('user_seeks', 0)}")
+                create_stmt = idx.get('create_index_statement', '')
+                if create_stmt:
+                    print(f"     CREATE: {create_stmt[:100]}...")
                 print()
         
         # Show unused indexes
-        if results.unused_indexes:
+        unused_indexes = results_dict.get('unused_indexes', [])
+        if unused_indexes:
             print(f"\n🗑️ Unused Indexes (consider dropping):")
-            for i, idx in enumerate(results.unused_indexes[:3], 1):
-                print(f"  {i}. {idx.table_name}.{idx.index_name}")
-                print(f"     Usage: Lookups={idx.user_lookups}, Scans={idx.user_scans}, Seeks={idx.user_seeks}, Updates={idx.user_updates}")
-                print(f"     DROP: {idx.drop_statement}")
+            for i, idx in enumerate(unused_indexes[:3], 1):
+                print(f"  {i}. {idx.get('table_name', 'Unknown')}.{idx.get('index_name', 'Unknown')}")
+                print(f"     Usage: Lookups={idx.get('user_lookups', 0)}, Scans={idx.get('user_scans', 0)}, Seeks={idx.get('user_seeks', 0)}, Updates={idx.get('user_updates', 0)}")
+                print(f"     DROP: {idx.get('drop_statement', '')}")
                 print()
         
         # Show overlapping indexes

@@ -617,7 +617,7 @@ class PerfMonTemplateManager:
             existing_collection = self.find_matching_collection(template_counters)
             
             if existing_collection:
-                self.logger.info(f"♻️  Reusing existing collection: {existing_collection}")
+                self.logger.info(f"Reusing existing collection: {existing_collection}")
                 return existing_collection
             
             # Create new collection
@@ -625,7 +625,7 @@ class PerfMonTemplateManager:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 collection_name = f"{self.sqlspeedinator_prefix}_{timestamp}"
             
-            self.logger.info(f"📊 Creating new collection: {collection_name}")
+            self.logger.info(f"Creating new collection: {collection_name}")
             
             # Use existing create_data_collector_set method
             dcs_file = self.create_data_collector_set(template_info, collection_name)
@@ -633,10 +633,10 @@ class PerfMonTemplateManager:
             if dcs_file:
                 # Track that we created this collection
                 self.managed_collections.add(collection_name)
-                self.logger.info(f"✅ Successfully created collection: {collection_name}")
+                self.logger.info(f"Successfully created collection: {collection_name}")
                 return collection_name
             else:
-                self.logger.error(f"❌ Failed to create collection: {collection_name}")
+                self.logger.error(f"Failed to create collection: {collection_name}")
                 return None
                 
         except Exception as e:
@@ -661,7 +661,7 @@ class PerfMonTemplateManager:
                 result = subprocess.run(delete_cmd, shell=True, capture_output=True, text=True)
                 
                 if result.returncode == 0:
-                    self.logger.info(f"🗑️  Cleaned up collection: {collection_name}")
+                    self.logger.info(f"Cleaned up collection: {collection_name}")
                     self.managed_collections.remove(collection_name)
                 else:
                     self.logger.warning(f"Failed to delete collection {collection_name}: {result.stderr}")
@@ -670,7 +670,7 @@ class PerfMonTemplateManager:
                 self.logger.error(f"Error cleaning up collection {collection_name}: {e}")
         
         if not self.managed_collections:
-            self.logger.info("✅ All managed collections cleaned up successfully")
+            self.logger.info("All managed collections cleaned up successfully")
     
     def __del__(self):
         """Destructor to ensure cleanup"""

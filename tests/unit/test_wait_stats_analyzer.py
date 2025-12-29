@@ -31,12 +31,14 @@ class TestWaitStatsAnalyzer:
                             
                             result = analyzer.analyze()
                             
-                            assert 'current_waits' in result
-                            assert 'wait_history' in result
-                            assert 'high_waits' in result
-                            assert 'wait_analysis' in result
-                            assert 'recommendations' in result
-                            assert result['current_waits'] == sample_wait_stats
+                            # Result is AnalysisResult object, check data attribute
+                            assert result.success
+                            assert 'current_waits' in result.data
+                            assert 'wait_history' in result.data
+                            assert 'high_waits' in result.data
+                            assert 'wait_analysis' in result.data
+                            assert 'recommendations' in result.data
+                            assert result.data['current_waits'] == sample_wait_stats
 
     def test_analyze_failure(self, mock_sql_connection, mock_config):
         """Test analysis failure handling"""
@@ -46,8 +48,10 @@ class TestWaitStatsAnalyzer:
         with patch.object(analyzer, '_get_current_waits', side_effect=Exception("Test error")):
             result = analyzer.analyze()
             
-            assert 'error' in result
-            assert "Test error" in result['error']
+            # Result is AnalysisResult object with error
+            assert not result.success
+            assert result.error is not None
+            assert "Test error" in result.error
 
     def test_get_current_waits_success(self, mock_sql_connection, mock_config):
         """Test successful current waits retrieval"""

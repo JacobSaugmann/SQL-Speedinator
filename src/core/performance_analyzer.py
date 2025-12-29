@@ -127,10 +127,24 @@ class PerformanceAnalyzer:
                 step_duration = (datetime.now() - step_start).total_seconds()
                 self.logger.info(f"{step_name} completed in {step_duration:.2f} seconds")
                 
+                # All analyzers now return AnalysisResult - extract data and track success
+                if hasattr(result, 'data'):
+                    result_data = result.data if result.success else {}
+                    success = result.success
+                    error_msg = result.error if not result.success else None
+                else:
+                    # Fallback for non-AnalysisResult returns (shouldn't happen anymore)
+                    self.logger.warning(f"{step_name} returned non-AnalysisResult type: {type(result)}")
+                    result_data = result
+                    success = True
+                    error_msg = None
+                
                 self.analysis_results[step_key] = {
-                    'data': result,
+                    'data': result_data,
                     'duration_seconds': step_duration,
-                    'timestamp': step_start
+                    'timestamp': step_start,
+                    'success': success,
+                    'error': error_msg
                 }
                 
                 # Add delay in night mode to reduce server load
@@ -143,7 +157,8 @@ class PerformanceAnalyzer:
                 self.logger.error(f"Error during {step_name}: {e}", exc_info=True)
                 self.analysis_results[step_key] = {
                     'error': str(e),
-                    'timestamp': datetime.now()
+                    'timestamp': datetime.now(),
+                    'success': False
                 }
     
     def _run_intelligent_correlations(self) -> None:

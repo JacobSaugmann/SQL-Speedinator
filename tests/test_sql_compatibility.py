@@ -71,46 +71,33 @@ def test_server_config_analyzer():
             if conn.test_connection():
                 analyzer = ServerConfigAnalyzer(conn, config)
                 
-                # Test server info
-                print("   🔍 Testing server info query...")
-                server_info = analyzer._get_server_info()
-                if server_info and len(server_info) > 0:
-                    print("   ✅ Server info query: SUCCESS")
-                    server = server_info[0]
-                    print(f"      Server: {server.get('server_name', 'Unknown')}")
-                    print(f"      Version: {server.get('product_version', 'Unknown')}")
-                else:
-                    print("   ⚠️  Server info query: No results")
+                # Test via analyze() method
+                print("   🔍 Running server config analysis...")
+                result = analyzer.analyze()
                 
-                # Test configuration settings
-                print("   🔍 Testing configuration settings query...")
-                config_settings = analyzer._get_configuration_settings()
-                if config_settings and len(config_settings) > 0:
-                    print(f"   ✅ Configuration settings: {len(config_settings)} settings found")
+                if result.success:
+                    data = result.data
+                    print("   ✅ Server config analysis: SUCCESS")
+                    
+                    # Check key sections
+                    if 'server_info' in data and data['server_info']:
+                        server = data['server_info'][0] if isinstance(data['server_info'], list) else data['server_info']
+                        print(f"      Server: {server.get('server_name', 'Unknown')}")
+                        print(f"      Version: {server.get('product_version', 'Unknown')}")
+                    
+                    if 'configuration_settings' in data:
+                        print(f"      Configuration settings: {len(data['configuration_settings'])} settings")
+                    
+                    if 'memory_analysis' in data and data['memory_analysis'].get('issues'):
+                        print(f"      Memory issues: {len(data['memory_analysis']['issues'])}")
+                    
+                    if 'parallelism_analysis' in data and data['parallelism_analysis'].get('issues'):
+                        print(f"      Parallelism issues: {len(data['parallelism_analysis']['issues'])}")
+                    
+                    return True
                 else:
-                    print("   ⚠️  Configuration settings: No results")
-                
-                # Test memory configuration
-                print("   🔍 Testing memory configuration analysis...")
-                memory_analysis = analyzer._analyze_memory_configuration()
-                if not memory_analysis.get('error'):
-                    print("   ✅ Memory configuration analysis: SUCCESS")
-                    if memory_analysis.get('issues'):
-                        print(f"      Found {len(memory_analysis['issues'])} memory issues")
-                else:
-                    print(f"   ⚠️  Memory configuration analysis: {memory_analysis.get('error')}")
-                
-                # Test parallelism settings
-                print("   🔍 Testing parallelism settings analysis...")
-                parallelism_analysis = analyzer._analyze_parallelism_settings()
-                if not parallelism_analysis.get('error'):
-                    print("   ✅ Parallelism settings analysis: SUCCESS")
-                    if parallelism_analysis.get('issues'):
-                        print(f"      Found {len(parallelism_analysis['issues'])} parallelism issues")
-                else:
-                    print(f"   ⚠️  Parallelism settings analysis: {parallelism_analysis.get('error')}")
-                
-                return True
+                    print(f"   ❌ Server config analysis failed: {result.error}")
+                    return False
             else:
                 print("   ❌ Failed to connect to SQL Server")
                 return False
@@ -138,9 +125,11 @@ def test_tempdb_analyzer():
                 
                 # Test full analysis
                 print("   🔍 Running full TempDB analysis...")
-                results = analyzer.analyze()
+                result = analyzer.analyze()
                 
-                if not results.get('error'):
+                # Extract data from AnalysisResult
+                if result.success:
+                    results = result.data
                     print("   ✅ TempDB analysis: SUCCESS")
                     
                     # Check key sections
@@ -156,7 +145,7 @@ def test_tempdb_analyzer():
                     
                     return True
                 else:
-                    print(f"   ❌ TempDB analysis failed: {results.get('error')}")
+                    print(f"   ❌ TempDB analysis failed: {result.error}")
                     return False
             else:
                 print("   ❌ Failed to connect to SQL Server")
@@ -183,33 +172,29 @@ def test_plan_cache_analyzer():
             if conn.test_connection():
                 analyzer = PlanCacheAnalyzer(conn, config)
                 
-                # Test cache overview
-                print("   🔍 Testing cache overview...")
-                cache_overview = analyzer._get_cache_overview()
-                if cache_overview and len(cache_overview) > 0:
-                    print("   ✅ Cache overview: SUCCESS")
-                    overview = cache_overview[0]
-                    print(f"      Total plans: {overview.get('total_plans', 0)}")
-                else:
-                    print("   ⚠️  Cache overview: No results")
+                # Test via analyze() method
+                print("   🔍 Running plan cache analysis...")
+                result = analyzer.analyze()
                 
-                # Test expensive queries
-                print("   🔍 Testing expensive queries...")
-                expensive_queries = analyzer._get_expensive_queries()
-                if expensive_queries and len(expensive_queries) > 0:
-                    print(f"   ✅ Expensive queries: {len(expensive_queries)} queries found")
+                if result.success:
+                    data = result.data
+                    print("   ✅ Plan cache analysis: SUCCESS")
+                    
+                    # Check key sections
+                    if 'cache_overview' in data and data['cache_overview']:
+                        overview = data['cache_overview'][0] if isinstance(data['cache_overview'], list) else data['cache_overview']
+                        print(f"      Total plans: {overview.get('total_plans', 0)}")
+                    
+                    if 'expensive_queries' in data and data['expensive_queries']:
+                        print(f"      Expensive queries: {len(data['expensive_queries'])}")
+                    
+                    if 'memory_pressure' in data:
+                        print("      Memory pressure analysis: Completed")
+                    
+                    return True
                 else:
-                    print("   ⚠️  Expensive queries: No results")
-                
-                # Test memory pressure analysis
-                print("   🔍 Testing memory pressure analysis...")
-                memory_pressure = analyzer._analyze_memory_pressure()
-                if not memory_pressure.get('error'):
-                    print("   ✅ Memory pressure analysis: SUCCESS")
-                else:
-                    print(f"   ⚠️  Memory pressure analysis: {memory_pressure.get('error')}")
-                
-                return True
+                    print(f"   ❌ Plan cache analysis failed: {result.error}")
+                    return False
             else:
                 print("   ❌ Failed to connect to SQL Server")
                 return False
