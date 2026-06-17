@@ -459,6 +459,7 @@ class ServerDatabaseAnalyzer(BaseAnalyzer):
             CASE 
                 WHEN bs_full.backup_finish_date IS NULL THEN 'CRITICAL: No full backup found'
                 WHEN bs_full.backup_finish_date < DATEADD(DAY, -7, GETDATE()) THEN 'WARNING: Full backup older than 7 days'
+                WHEN d.recovery_model_desc = 'FULL' AND bs_log.backup_finish_date IS NULL THEN 'WARNING: No log backup found'
                 WHEN d.recovery_model_desc = 'FULL' AND bs_log.backup_finish_date < DATEADD(HOUR, -24, GETDATE()) THEN 'WARNING: Log backup older than 24 hours'
                 ELSE 'OK'
             END as backup_status

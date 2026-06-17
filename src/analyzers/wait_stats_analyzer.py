@@ -36,12 +36,14 @@ class WaitStatsAnalyzer(BaseAnalyzer):
             AnalysisResult with wait statistics analysis data
         """
         try:
+            current_waits = self._get_current_waits() or []
+            problematic_waits = self._identify_problematic_waits(current_waits)
             results = {
-                'current_waits': self._get_current_waits(),
+                'current_waits': current_waits,
                 'wait_history': self._get_wait_history(),
-                'high_waits': self._identify_problematic_waits(),
-                'wait_analysis': self._analyze_wait_patterns(),
-                'recommendations': self._generate_wait_recommendations()
+                'high_waits': problematic_waits,
+                'wait_analysis': self._analyze_wait_patterns(current_waits),
+                'recommendations': self._generate_wait_recommendations(problematic_waits)
             }
             
             return AnalysisResult.success_result(data=results)
@@ -121,9 +123,8 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         
         return self.connection.execute_query(query)
     
-    def _identify_problematic_waits(self) -> List[Dict[str, Any]]:
+    def _identify_problematic_waits(self, current_waits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Identify waits that indicate specific problems"""
-        current_waits = self._get_current_waits()
         if not current_waits:
             return []
         
@@ -182,9 +183,8 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         
         return problematic_waits
     
-    def _analyze_wait_patterns(self) -> Dict[str, Any]:
+    def _analyze_wait_patterns(self, current_waits: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Analyze patterns in wait statistics"""
-        current_waits = self._get_current_waits()
         if not current_waits:
             return {}
         
@@ -229,10 +229,9 @@ class WaitStatsAnalyzer(BaseAnalyzer):
         
         return analysis
     
-    def _generate_wait_recommendations(self) -> List[Dict[str, Any]]:
+    def _generate_wait_recommendations(self, problematic_waits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Generate specific recommendations based on wait analysis"""
         recommendations = []
-        problematic_waits = self._identify_problematic_waits()
         
         for wait in problematic_waits:
             wait_type = wait.get('wait_type')

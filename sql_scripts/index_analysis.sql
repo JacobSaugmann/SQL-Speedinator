@@ -25,8 +25,8 @@ SELECT
         ELSE 'OK'
     END AS recommended_action,
     CASE 
-        WHEN ps.avg_fragmentation_in_percent > 30 THEN 'ALTER INDEX [' + i.name + '] ON [' + OBJECT_SCHEMA_NAME(ps.object_id, ps.database_id) + '].[' + OBJECT_NAME(ps.object_id, ps.database_id) + '] REBUILD;'
-        WHEN ps.avg_fragmentation_in_percent > 10 THEN 'ALTER INDEX [' + i.name + '] ON [' + OBJECT_SCHEMA_NAME(ps.object_id, ps.database_id) + '].[' + OBJECT_NAME(ps.object_id, ps.database_id) + '] REORGANIZE;'
+        WHEN ps.avg_fragmentation_in_percent > 30 THEN 'ALTER INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(ps.object_id, ps.database_id)) + '.' + QUOTENAME(OBJECT_NAME(ps.object_id, ps.database_id)) + ' REBUILD;'
+        WHEN ps.avg_fragmentation_in_percent > 10 THEN 'ALTER INDEX ' + QUOTENAME(i.name) + ' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(ps.object_id, ps.database_id)) + '.' + QUOTENAME(OBJECT_NAME(ps.object_id, ps.database_id)) + ' REORGANIZE;'
         ELSE NULL
     END AS maintenance_command
 FROM sys.dm_db_index_physical_stats(NULL, NULL, NULL, NULL, 'LIMITED') ps
@@ -39,7 +39,13 @@ AND ps.database_id = DB_ID()
 ORDER BY ps.avg_fragmentation_in_percent DESC, ps.page_count DESC;
 
 -- Index usage statistics
-SELECT 
+;WITH IndexPartitions AS (
+    SELECT p.object_id, p.index_id, SUM(p.rows) AS table_rows, SUM(a.total_pages) AS total_pages
+    FROM sys.partitions p
+    INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
+    GROUP BY p.object_id, p.index_id
+)
+SELECT
     DB_NAME() AS database_name,
     OBJECT_SCHEMA_NAME(i.object_id) AS schema_name,
     OBJECT_NAME(i.object_id) AS table_name,
@@ -56,21 +62,20 @@ SELECT
     us.last_user_scan,
     us.last_user_lookup,
     us.last_user_update,
-    p.rows AS table_rows,
-    CAST(SUM(a.total_pages) * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb,
-    CASE 
+    ip.table_rows,
+    CAST(ip.total_pages * 8.0 / 1024 AS DECIMAL(10,2)) AS size_mb,
+    CASE
         WHEN (ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0)) = 0 THEN 'UNUSED'
         WHEN us.user_updates > (us.user_seeks + us.user_scans + us.user_lookups) * 5 THEN 'OVER_UPDATED'
         WHEN us.user_seeks > 1000 THEN 'HIGHLY_USED'
         WHEN us.user_seeks > 100 THEN 'MODERATELY_USED'
         ELSE 'LIGHTLY_USED'
     END AS usage_pattern,
-    -- Columns in index
     STUFF((
         SELECT ', ' + c.name + CASE WHEN ic.is_descending_key = 1 THEN ' DESC' ELSE ' ASC' END
         FROM sys.index_columns ic
         INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
-        WHERE ic.object_id = i.object_id 
+        WHERE ic.object_id = i.object_id
         AND ic.index_id = i.index_id
         AND ic.is_included_column = 0
         ORDER BY ic.key_ordinal
@@ -80,7 +85,7 @@ SELECT
         SELECT ', ' + c.name
         FROM sys.index_columns ic
         INNER JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
-        WHERE ic.object_id = i.object_id 
+        WHERE ic.object_id = i.object_id
         AND ic.index_id = i.index_id
         AND ic.is_included_column = 1
         ORDER BY ic.key_ordinal
@@ -88,17 +93,11 @@ SELECT
     ), 1, 2, '') AS included_columns
 FROM sys.indexes i
 LEFT JOIN sys.dm_db_index_usage_stats us ON i.object_id = us.object_id AND i.index_id = us.index_id AND us.database_id = DB_ID()
-INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
-INNER JOIN sys.allocation_units a ON p.partition_id = a.container_id
+INNER JOIN IndexPartitions ip ON i.object_id = ip.object_id AND i.index_id = ip.index_id
 WHERE i.type > 0  -- Exclude heaps
 AND i.is_disabled = 0
 AND i.is_hypothetical = 0
 AND OBJECT_SCHEMA_NAME(i.object_id) NOT IN ('sys', 'INFORMATION_SCHEMA')
-GROUP BY i.object_id, i.index_id, i.name, i.type_desc, i.is_unique, 
-         i.is_primary_key, i.is_unique_constraint, us.user_seeks, 
-         us.user_scans, us.user_lookups, us.user_updates, 
-         us.last_user_seek, us.last_user_scan, us.last_user_lookup, 
-         us.last_user_update, p.rows
 ORDER BY (ISNULL(us.user_seeks, 0) + ISNULL(us.user_scans, 0) + ISNULL(us.user_lookups, 0)) DESC;
 
 -- Duplicate/overlapping indexes

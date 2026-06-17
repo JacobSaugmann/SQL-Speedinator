@@ -120,12 +120,13 @@ class CircuitBreaker:
     def _on_success(self) -> None:
         """Handle successful call"""
         self.success_count += 1
-        
+        self.failure_count = 0
+        self.last_failure_time = None
+
         if self.state == CircuitState.HALF_OPEN:
             # Recovery successful, close circuit
             self.logger.info(f"{self.name}: Circuit CLOSED (service recovered)")
             self.state = CircuitState.CLOSED
-            self.failure_count = 0
             self.success_count = 0
     
     def _on_failure(self) -> None:

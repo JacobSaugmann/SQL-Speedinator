@@ -62,8 +62,7 @@ class SQLServerConnection:
         
         # Handle ODBC Driver 18+ encryption requirements
         if 'Driver 18' in driver:
-            # Driver 18 requires encryption settings
-            connection_string += "Encrypt=no;"  # Disable encryption for local connections
+            connection_string += "Encrypt=yes;TrustServerCertificate=yes;"
         
         self.logger.debug(f"Connection driver: {driver}")
         
@@ -164,7 +163,10 @@ class SQLServerConnection:
         """Execute query with retry logic for transient failures"""
         for attempt in range(max_retries):
             try:
-                return self.execute_query(query, parameters)
+                result = self.execute_query(query, parameters)
+                if result is not None:
+                    return result
+                raise RuntimeError("Query returned None")
             except Exception as e:
                 self.logger.warning(f"Query attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
@@ -206,16 +208,22 @@ class SQLServerConnection:
         Returns:
             bool: True if successful, False otherwise
         """
+        cursor = None
         try:
-            query = f"USE [{database_name}]"
             cursor = self.connection.cursor()
-            cursor.execute(query)
-            cursor.close()
+            cursor.execute("SELECT QUOTENAME(name) FROM sys.databases WHERE name = ?", (database_name,))
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError(f"Unknown database: {database_name}")
+            cursor.execute(f"USE {row[0]}")
             self.logger.debug(f"Changed to database: {database_name}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to change to database {database_name}: {str(e)}")
             return False
+        finally:
+            if cursor is not None:
+                cursor.close()
     
     def __enter__(self):
         """Context manager entry"""

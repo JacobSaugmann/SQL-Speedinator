@@ -122,11 +122,17 @@ class AnalysisStatusTracker:
             server_name: SQL Server name being analyzed
             analysis_type: Type of analysis (standard, ai, perfmon, etc.)
         """
+        self._stop_update_thread()
+
         self.analysis_start_time = datetime.now()
-        
+        self.current_phase = None
+        self.phase_history.clear()
+        self.overall_progress = 0.0
+        self.last_display_time = self.analysis_start_time
+
         # Print header
         self._print_header(server_name, analysis_type)
-        
+
         # Start real-time updates
         if self.show_real_time_updates:
             self._start_update_thread()

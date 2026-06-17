@@ -250,7 +250,7 @@ class PlanCacheAnalyzer(BaseAnalyzer):
                 'memory_clerks': memory_clerks,
                 'eviction_stats': eviction_stats,
                 'pressure_indicators': pressure_indicators,
-                'memory_pressure_level': 'HIGH' if len(pressure_indicators) > 2 else 'MEDIUM' if len(pressure_indicators) > 0 else 'LOW'
+                'memory_pressure_level': 'HIGH' if len(pressure_indicators) >= 2 else 'MEDIUM' if len(pressure_indicators) > 0 else 'LOW'
             }
             
         except Exception as e:
